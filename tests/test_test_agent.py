@@ -1,15 +1,14 @@
 import sys
 import unittest
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
 from tcr_agent.agents.report_agent import run_report_agent
 from tcr_agent.agents.test_agent import run_test_agent
 from tcr_agent.graph import run_direct
 from tcr_agent.llm_gateway import StaticLLMGateway
 from tcr_agent.schemas import LLMResponse, ProjectInput
 from tcr_agent.tools import resolve_test_command
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 
 class TestTestAgent(unittest.TestCase):
