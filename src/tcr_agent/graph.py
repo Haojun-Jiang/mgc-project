@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .agents.report_agent import run_report_agent
 from .agents.test_agent import run_test_agent
 from .schemas import GraphState, ProjectInput
 
@@ -14,8 +15,10 @@ def build_graph():
 
     graph = StateGraph(GraphState)
     graph.add_node("test_agent", run_test_agent)
+    graph.add_node("report_agent", run_report_agent)
     graph.add_edge(START, "test_agent")
-    graph.add_edge("test_agent", END)
+    graph.add_edge("test_agent", "report_agent")
+    graph.add_edge("report_agent", END)
     return graph.compile()
 
 
@@ -37,4 +40,5 @@ def run_direct(project: ProjectInput | dict[str, Any]) -> GraphState:
         "project": project_input.to_dict(),
         "errors": [],
     }
-    return run_test_agent(initial_state)
+    state = run_test_agent(initial_state)
+    return run_report_agent(state)

@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..llm_gateway import LLMGateway
 from ..schemas import GraphState, ProjectInput, Status, TestAgentResult
 from ..tools import run_python_compliance, run_python_tests, write_project_to_workspace
+from .ai_code_review import run_ai_code_review
 
 
-def run_test_agent(state: GraphState) -> GraphState:
+def run_test_agent(state: GraphState, gateway: LLMGateway | None = None) -> GraphState:
     try:
         project = ProjectInput.from_dict(state["project"])
         workspace = write_project_to_workspace(project)
         test_result = run_python_tests(project, workspace)
         compliance_results = run_python_compliance(project, workspace)
+        compliance_results.append(run_ai_code_review(project, gateway=gateway))
 
         status = resolve_status(test_result.status, [item.status for item in compliance_results])
         raw_logs_ref = write_raw_logs(workspace, test_result, compliance_results)
@@ -64,8 +67,15 @@ def write_raw_logs(workspace: Path, test_result, compliance_results) -> str:
         chunks.append("\n\n## stderr\n")
         chunks.append(test_result.command_result.stderr)
     for item in compliance_results:
+        chunks.append(f"\n\n## compliance: {item.tool}\n")
+        if item.warnings:
+            chunks.append("\n".join(f"WARNING: {warning}" for warning in item.warnings))
+            chunks.append("\n")
+        if item.issues:
+            chunks.append("\nIssues:\n")
+            for issue in item.issues:
+                chunks.append(f"- [{issue.severity.value}] {issue.rule_id} {issue.file}:{issue.line} {issue.message}\n")
         if item.command_result:
-            chunks.append(f"\n\n## compliance: {item.tool}\n")
             chunks.append(" ".join(item.command_result.command))
             chunks.append("\n\n## stdout\n")
             chunks.append(item.command_result.stdout)

@@ -1,0 +1,26 @@
+{
+  "run_id": "demo_python_bug_ai_review_001",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "language": "python",
+      "content": "def add(a, b):\n    return a - b\n"
+    },
+    {
+      "path": "test_main.py",
+      "language": "python",
+      "content": "import unittest\nfrom main import add\n\n\nclass TestAdd(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(1, 2), 3)\n\n\nif __name__ == '__main__':\n    unittest.main()\n"
+    }
+  ],
+  "config": {
+    "lint_tools": ["py_compile"],
+    "test_timeout_seconds": 30,
+    "ai_code_review_enabled": true,
+    "ai_code_review_max_chars": 12000,
+    "ai_code_review_max_tokens": 2048,
+    "report_use_llm": false,
+    "auto_fix": false,
+    "max_fix_rounds": 2
+  }
+}

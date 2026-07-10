@@ -119,6 +119,12 @@ class ComplianceIssue:
     line: int | None
     message: str
     severity: Severity = Severity.INFO
+    category: str = ""
+    confidence: float = 0.0
+    line_end: int | None = None
+    evidence: str = ""
+    root_cause: str = ""
+    recommendation: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -132,6 +138,7 @@ class ComplianceResult:
     status: Status
     issues: list[ComplianceIssue] = field(default_factory=list)
     command_result: CommandResult | None = None
+    warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -158,6 +165,66 @@ class TestAgentResult:
             "compliance_results": [item.to_dict() for item in self.compliance_results],
             "raw_logs_ref": self.raw_logs_ref,
             "workspace_dir": self.workspace_dir,
+        }
+
+
+@dataclass(slots=True)
+class ReportIssue:
+    issue_id: str
+    source: str
+    type: str
+    severity: Severity
+    confidence: float
+    file: str = ""
+    line_start: int | None = None
+    line_end: int | None = None
+    evidence: str = ""
+    root_cause: str = ""
+    recommendation: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["severity"] = self.severity.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ReportIssue":
+        return cls(
+            issue_id=str(data.get("issue_id", "")),
+            source=str(data.get("source", "")),
+            type=str(data.get("type", "unknown")),
+            severity=parse_severity(data.get("severity")),
+            confidence=float(data.get("confidence", 0.5)),
+            file=str(data.get("file", "")),
+            line_start=parse_optional_int(data.get("line_start")),
+            line_end=parse_optional_int(data.get("line_end")),
+            evidence=str(data.get("evidence", "")),
+            root_cause=str(data.get("root_cause", "")),
+            recommendation=str(data.get("recommendation", "")),
+        )
+
+
+@dataclass(slots=True)
+class ReportAgentResult:
+    agent: Literal["ReportAgent"]
+    status: Status
+    summary: str
+    issues: list[ReportIssue]
+    risk_level: Severity = Severity.INFO
+    should_fix: bool = False
+    llm_used: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "status": self.status.value,
+            "summary": self.summary,
+            "issues": [item.to_dict() for item in self.issues],
+            "risk_level": self.risk_level.value,
+            "should_fix": self.should_fix,
+            "llm_used": self.llm_used,
+            "warnings": self.warnings,
         }
 
 
@@ -190,14 +257,23 @@ class LLMRequest:
     messages: list[LLMMessage]
     tools: list[dict[str, Any]] = field(default_factory=list)
     max_tokens: int = 4096
+    temperature: float = 0.2
+    tool_choice: str | dict[str, Any] | None = None
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "model": self.model,
             "messages": [item.to_dict() for item in self.messages],
-            "tools": self.tools,
             "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
         }
+        if self.tools:
+            data["tools"] = self.tools
+        if self.tool_choice is not None:
+            data["tool_choice"] = self.tool_choice
+        data.update(self.extra_body)
+        return data
 
 
 @dataclass(slots=True)
@@ -222,3 +298,22 @@ class GraphState(TypedDict, total=False):
     fix_result: dict[str, Any]
     verify_result: dict[str, Any]
     errors: list[str]
+
+
+def parse_severity(raw: Any) -> Severity:
+    if isinstance(raw, Severity):
+        return raw
+    value = str(raw or "").lower()
+    for item in Severity:
+        if item.value == value:
+            return item
+    return Severity.INFO
+
+
+def parse_optional_int(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None

@@ -4,6 +4,7 @@ import importlib.util
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -113,11 +114,11 @@ def resolve_test_command(project: ProjectInput) -> list[str]:
 
     if has_test_files(project.files):
         if importlib.util.find_spec("pytest") is not None:
-            return ["python3", "-m", "pytest", "-q"]
-        return ["python3", "-m", "unittest", "discover", "-v"]
+            return [sys.executable, "-m", "pytest", "-q"]
+        return [sys.executable, "-m", "unittest", "discover", "-v"]
 
     python_files = [item.path for item in project.files if item.language == "python" or item.path.endswith(".py")]
-    return ["python3", "-m", "py_compile", *python_files]
+    return [sys.executable, "-m", "py_compile", *python_files]
 
 
 def has_test_files(files: list[CodeFile]) -> bool:
@@ -210,7 +211,7 @@ def run_py_compile(project: ProjectInput, workspace: Path) -> ComplianceResult:
     python_files = [item.path for item in project.files if item.language == "python" or item.path.endswith(".py")]
     if not python_files:
         return ComplianceResult(tool="py_compile", status=Status.SKIPPED)
-    result = run_command("run_compliance", ["python3", "-m", "py_compile", *python_files], workspace)
+    result = run_command("run_compliance", [sys.executable, "-m", "py_compile", *python_files], workspace)
     issue = None
     if result.status == Status.FAILED:
         issue = ComplianceIssue(
