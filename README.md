@@ -257,6 +257,37 @@ python run.py \
   --ai-review > full_review_result.json
 ```
 
+## FastAPI 服务
+
+启动本地 Agent 服务：
+
+```bash
+.venv/bin/python -m uvicorn tcr_agent.api:app --host 127.0.0.1 --port 8010
+```
+
+上传文件并创建异步 run：
+
+```bash
+curl -F "files=@examples/python_no_tests/order_pricing.py" \
+  -F "requirement=订单金额计算需求" \
+  -F "ai_review=true" \
+  -F "llm_generate_tests=true" \
+  -F "report_use_llm=true" \
+  -F "auto_fix=true" \
+  http://127.0.0.1:8010/runs
+```
+
+常用接口：
+
+```text
+GET /runs/{run_id}              查询运行状态、步骤和完整结果
+GET /runs/{run_id}/report       获取 ReportAgent 报告
+GET /runs/{run_id}/diff.patch   获取 FixAgent 生成的 unified diff
+GET /runs/{run_id}/fixed-files  获取沙箱中修复后的文件内容
+```
+
+服务会把每次运行的输入和产物保存到 `.tcr_runs/{run_id}/`，其中包括 `result.json`、`fix.patch` 和 `fixed_files/`。
+
 ## 示例测试用例
 
 示例代码：
