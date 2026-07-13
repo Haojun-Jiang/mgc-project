@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from tcr_agent.agents.llm_test_generation_agent import run_llm_test_generation_agent
 from tcr_agent.agents.report_agent import run_report_agent
 from tcr_agent.agents.test_agent import run_test_agent
 from tcr_agent.graph import run_direct
@@ -27,10 +28,15 @@ class TestTestAgent(unittest.TestCase):
 
     def test_no_tests_defaults_to_static_only_without_llm(self):
         gateway = StaticLLMGateway(LLMResponse(content=generated_test_response()))
-        state = run_test_agent(base_state({"llm_generated_tests_enabled": False}), gateway=gateway)
+        state = run_llm_test_generation_agent(base_state({"llm_generated_tests_enabled": False}), gateway=gateway)
+        state = run_test_agent(state, gateway=gateway)
 
+        generated = state["generated_test_result"]
         summary = state["test_result"]["test_results"][0]
         self.assertEqual(len(gateway.requests), 0)
+        self.assertEqual(generated["status"], "skipped")
+        self.assertFalse(generated["attempted"])
+        self.assertFalse(generated["generated"])
         self.assertEqual(resolve_test_strategy(ProjectInput.from_dict(state["project"])), "static_only")
         self.assertEqual(summary["tool"], "static_only")
         self.assertEqual(summary["status"], "skipped")
@@ -40,20 +46,30 @@ class TestTestAgent(unittest.TestCase):
 
     def test_llm_generated_tests_are_written_and_executed(self):
         gateway = StaticLLMGateway(LLMResponse(content=generated_test_response()))
-        state = run_test_agent(
-            base_state(
-                {
+        state = run_direct(
+            {
+                "run_id": "unit_generated_tests",
+                "language": "python",
+                "files": [{"path": "main.py", "content": "def add(a, b):\n    return a - b\n"}],
+                "config": {
+                    "lint_tools": ["py_compile"],
                     "llm_generated_tests_enabled": True,
                     "requirement": "add(a, b) 应返回 a 与 b 的和",
+                    "report_use_llm": False,
                 },
-                code="def add(a, b):\n    return a - b\n",
-            ),
+            },
             gateway=gateway,
         )
 
+        generated = state["generated_test_result"]
         summary = state["test_result"]["test_results"][0]
         generated_path = Path(summary["generated_test_ref"])
         self.assertEqual(len(gateway.requests), 1)
+        self.assertEqual(generated["agent"], "LLMTestGenerationAgent")
+        self.assertEqual(generated["status"], "completed")
+        self.assertTrue(generated["attempted"])
+        self.assertTrue(generated["generated"])
+        self.assertEqual(generated["test_files"][0]["path"], "test_generated_llm.py")
         self.assertEqual(summary["tool"], "llm_generated_tests")
         self.assertEqual(summary["status"], "failed")
         self.assertEqual(summary["test_mode"], "llm_generated_test")
@@ -64,9 +80,14 @@ class TestTestAgent(unittest.TestCase):
 
     def test_llm_generated_tests_invalid_json_is_skipped(self):
         gateway = StaticLLMGateway(LLMResponse(content="not json"))
-        state = run_test_agent(base_state({"llm_generated_tests_enabled": True}), gateway=gateway)
+        state = run_llm_test_generation_agent(base_state({"llm_generated_tests_enabled": True}), gateway=gateway)
+        state = run_test_agent(state, gateway=gateway)
 
+        generated = state["generated_test_result"]
         summary = state["test_result"]["test_results"][0]
+        self.assertEqual(generated["status"], "skipped")
+        self.assertTrue(generated["attempted"])
+        self.assertFalse(generated["generated"])
         self.assertEqual(summary["tool"], "llm_generated_tests")
         self.assertEqual(summary["status"], "skipped")
         self.assertTrue(summary["warnings"])
@@ -82,15 +103,37 @@ class TestTestAgent(unittest.TestCase):
                 )
             )
         )
-        state = run_test_agent(base_state({"llm_generated_tests_enabled": True}), gateway=gateway)
+        state = run_llm_test_generation_agent(base_state({"llm_generated_tests_enabled": True}), gateway=gateway)
+        state = run_test_agent(state, gateway=gateway)
 
+        generated = state["generated_test_result"]
         summary = state["test_result"]["test_results"][0]
+        self.assertEqual(generated["status"], "skipped")
         self.assertEqual(summary["status"], "skipped")
         self.assertIn("unsafe generated test file path", summary["warnings"][0])
 
+    def test_llm_generated_tests_empty_code_is_skipped(self):
+        gateway = StaticLLMGateway(
+            LLMResponse(
+                content=(
+                    '{"inferred_behavior":"unclear","confidence":0.4,'
+                    '"test_file":"test_generated_llm.py","test_code":"","warnings":["无法安全生成测试"]}'
+                )
+            )
+        )
+        state = run_llm_test_generation_agent(base_state({"llm_generated_tests_enabled": True}), gateway=gateway)
+        state = run_test_agent(state, gateway=gateway)
+
+        generated = state["generated_test_result"]
+        summary = state["test_result"]["test_results"][0]
+        self.assertEqual(generated["status"], "skipped")
+        self.assertTrue(generated["attempted"])
+        self.assertEqual(summary["status"], "skipped")
+        self.assertTrue(summary["warnings"])
+
     def test_user_tests_do_not_trigger_llm_generated_tests(self):
         gateway = StaticLLMGateway(LLMResponse(content=generated_test_response()))
-        state = run_test_agent(
+        state = run_llm_test_generation_agent(
             {
                 "run_id": "unit_user_tests",
                 "project": {
@@ -106,9 +149,13 @@ class TestTestAgent(unittest.TestCase):
             },
             gateway=gateway,
         )
+        state = run_test_agent(state, gateway=gateway)
 
+        generated = state["generated_test_result"]
         summary = state["test_result"]["test_results"][0]
         self.assertEqual(len(gateway.requests), 0)
+        self.assertEqual(generated["status"], "skipped")
+        self.assertFalse(generated["attempted"])
         self.assertEqual(summary["test_mode"], "user_test")
         self.assertEqual(summary["oracle_source"], "user_provided")
 

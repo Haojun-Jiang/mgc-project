@@ -12,7 +12,7 @@ def run_test_agent(state: GraphState, gateway: LLMGateway | None = None) -> Grap
     try:
         project = ProjectInput.from_dict(state["project"])
         workspace = write_project_to_workspace(project)
-        test_result = run_python_tests(project, workspace, gateway=gateway)
+        test_result = run_python_tests(project, workspace, state.get("generated_test_result"))
         compliance_results = run_python_compliance(project, workspace)
         compliance_results.append(run_ai_code_review(project, gateway=gateway))
 

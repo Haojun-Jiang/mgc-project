@@ -175,6 +175,41 @@ class TestAgentResult:
 
 
 @dataclass(slots=True)
+class GeneratedTestFile:
+    path: str
+    content: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class LLMTestGenerationAgentResult:
+    agent: Literal["LLMTestGenerationAgent"]
+    status: Status
+    attempted: bool
+    generated: bool
+    oracle_source: str = "llm_inferred"
+    confidence: float = 0.0
+    inferred_behavior: str = ""
+    test_files: list[GeneratedTestFile] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "status": self.status.value,
+            "attempted": self.attempted,
+            "generated": self.generated,
+            "oracle_source": self.oracle_source,
+            "confidence": self.confidence,
+            "inferred_behavior": self.inferred_behavior,
+            "test_files": [item.to_dict() for item in self.test_files],
+            "warnings": self.warnings,
+        }
+
+
+@dataclass(slots=True)
 class ReportIssue:
     issue_id: str
     source: str
@@ -338,6 +373,7 @@ class LLMResponse:
 class GraphState(TypedDict, total=False):
     run_id: str
     project: dict[str, Any]
+    generated_test_result: dict[str, Any]
     test_result: dict[str, Any]
     report_result: dict[str, Any]
     fix_result: dict[str, Any]

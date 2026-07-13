@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..llm_gateway import LLMGateway, LLMGatewayConfig, build_llm_gateway
-from ..schemas import LLMMessage, LLMRequest, ProjectInput
+from ..schemas import GeneratedTestFile, LLMMessage, LLMRequest, ProjectInput
 
 DEFAULT_MAX_CHARS = 12000
 DEFAULT_MAX_CASES = 5
@@ -21,13 +21,12 @@ PROMPT_PATH = Path(__file__).resolve().parents[1] / "templates" / "llm_test_gene
 class GeneratedTestResult:
     inferred_behavior: str = ""
     confidence: float = 0.0
-    generated_test_ref: str = ""
+    test_files: list[GeneratedTestFile] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
 def generate_llm_tests(
     project: ProjectInput,
-    workspace: Path,
     gateway: LLMGateway | None = None,
 ) -> GeneratedTestResult:
     config = LLMGatewayConfig.from_env()
@@ -54,15 +53,10 @@ def generate_llm_tests(
         detail = f": {'; '.join(warnings)}" if warnings else ""
         raise ValueError(f"LLM generated test_code is empty{detail}")
 
-    generated_dir = workspace / GENERATED_TEST_DIR
-    generated_dir.mkdir(exist_ok=True)
-    target = generated_dir / test_file
-    target.write_text(test_code + "\n", encoding="utf-8")
-
     return GeneratedTestResult(
         inferred_behavior=str(data.get("inferred_behavior") or ""),
         confidence=parse_confidence(data.get("confidence")),
-        generated_test_ref=str(target),
+        test_files=[GeneratedTestFile(path=test_file, content=test_code + "\n")],
         warnings=warnings,
     )
 

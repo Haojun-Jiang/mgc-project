@@ -98,12 +98,16 @@ def truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return text[:limit] + f"\n...[truncated {len(text) - limit} chars]"
 
 
-def run_python_tests(project: ProjectInput, workspace: Path, gateway: Any = None) -> TestSummary:
-    strategy = resolve_test_strategy(project)
+def run_python_tests(
+    project: ProjectInput,
+    workspace: Path,
+    generated_test_result: dict[str, Any] | None = None,
+) -> TestSummary:
+    strategy = resolve_test_strategy(project, generated_test_result)
     if strategy == "static_only":
         return static_only_summary()
     if strategy == "llm_generated_test":
-        return run_llm_generated_tests(project, workspace, gateway)
+        return run_llm_generated_tests(project, workspace, generated_test_result)
 
     command = resolve_test_command(project)
     result = run_command("run_tests", command, workspace, int(project.config.get("test_timeout_seconds", 30)))
@@ -114,7 +118,7 @@ def run_python_tests(project: ProjectInput, workspace: Path, gateway: Any = None
     return summary
 
 
-def resolve_test_strategy(project: ProjectInput) -> str:
+def resolve_test_strategy(project: ProjectInput, generated_test_result: dict[str, Any] | None = None) -> str:
     configured = project.config.get("test_command")
     if isinstance(configured, str) and configured.strip():
         return "command_test"
@@ -122,6 +126,10 @@ def resolve_test_strategy(project: ProjectInput) -> str:
         return "command_test"
     if has_test_files(project.files):
         return "user_test"
+    if generated_test_result and (
+        generated_test_result.get("generated") or generated_test_result.get("attempted")
+    ):
+        return "llm_generated_test"
     if project.config.get("llm_generated_tests_enabled", False):
         return "llm_generated_test"
     return "static_only"
@@ -150,20 +158,45 @@ def has_test_files(files: list[CodeFile]) -> bool:
     return False
 
 
-def run_llm_generated_tests(project: ProjectInput, workspace: Path, gateway: Any = None) -> TestSummary:
-    try:
-        from .agents.llm_test_generation import GENERATED_TEST_DIR, generate_llm_tests
+def run_llm_generated_tests(
+    project: ProjectInput,
+    workspace: Path,
+    generated_test_result: dict[str, Any] | None = None,
+) -> TestSummary:
+    from .agents.llm_test_generation import GENERATED_TEST_DIR
 
-        generated = generate_llm_tests(project, workspace, gateway)
-    except Exception as exc:
+    generated_test_result = generated_test_result or {}
+    warnings = [
+        str(warning)
+        for warning in generated_test_result.get("warnings", [])
+        if str(warning or "").strip()
+    ]
+    if not generated_test_result.get("generated"):
         return TestSummary(
             tool="llm_generated_tests",
             command=[],
             status=Status.SKIPPED,
             test_mode="llm_generated_test",
             oracle_source="llm_inferred",
-            warnings=[f"LLM generated tests skipped: {exc}"],
+            warnings=warnings or ["LLM generated tests were not produced."],
         )
+
+    generated_dir = workspace / GENERATED_TEST_DIR
+    generated_dir.mkdir(exist_ok=True)
+    generated_refs = []
+    for raw_file in generated_test_result.get("test_files", []):
+        if not isinstance(raw_file, dict):
+            return skipped_generated_test_summary(["Malformed generated test file item."])
+        try:
+            test_file = normalize_generated_test_path(raw_file.get("path"))
+        except ValueError as exc:
+            return skipped_generated_test_summary([str(exc)])
+        content = raw_file.get("content")
+        if not isinstance(content, str) or not content.strip():
+            return skipped_generated_test_summary([f"Generated test content is empty: {test_file}"])
+        target = generated_dir / test_file
+        target.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
+        generated_refs.append(str(target))
 
     command = [sys.executable, "-m", "pytest", "-q", GENERATED_TEST_DIR]
     result = run_command("run_llm_generated_tests", command, workspace, int(project.config.get("test_timeout_seconds", 30)))
@@ -171,11 +204,39 @@ def run_llm_generated_tests(project: ProjectInput, workspace: Path, gateway: Any
     summary.command_result = result
     summary.test_mode = "llm_generated_test"
     summary.oracle_source = "llm_inferred"
-    summary.confidence = generated.confidence
-    summary.generated_test_ref = generated.generated_test_ref
-    summary.warnings = generated.warnings
-    summary.inferred_behavior = generated.inferred_behavior
+    summary.confidence = parse_float(generated_test_result.get("confidence"), 0.0)
+    summary.generated_test_ref = generated_refs[0] if generated_refs else ""
+    summary.warnings = warnings
+    summary.inferred_behavior = str(generated_test_result.get("inferred_behavior") or "")
     return summary
+
+
+def skipped_generated_test_summary(warnings: list[str]) -> TestSummary:
+    return TestSummary(
+        tool="llm_generated_tests",
+        command=[],
+        status=Status.SKIPPED,
+        test_mode="llm_generated_test",
+        oracle_source="llm_inferred",
+        warnings=warnings,
+    )
+
+
+def normalize_generated_test_path(raw: Any) -> Path:
+    value = str(raw or "").strip()
+    candidate = safe_relative_path(value)
+    if candidate.name != value:
+        raise ValueError(f"unsafe generated test file path: {value}")
+    if not value.startswith("test_") or not value.endswith(".py"):
+        raise ValueError(f"generated test file must match test_*.py: {value}")
+    return candidate
+
+
+def parse_float(raw: Any, default: float) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
 
 
 def static_only_summary() -> TestSummary:
