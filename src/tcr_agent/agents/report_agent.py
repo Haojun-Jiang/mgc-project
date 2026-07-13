@@ -25,6 +25,7 @@ REPORT_SYSTEM_PROMPT = """你是测试-合规-纠正系统中的 ReportAgent。
 2. 输出必须是一个 JSON object，不要输出 Markdown 或解释性前后缀。
 3. issues 中每个问题必须保留输入候选问题的 issue_id。
 4. recommendation 要面向后续 FixAgent，可执行、具体、简洁。
+5. 所有字符串字段必须是单行短文本，不要在 JSON 字符串中包含换行符。
 
 JSON 结构：
 {
@@ -82,13 +83,19 @@ def generate_report(
 ) -> ReportAgentResult:
     candidate_issues = build_candidate_issues(test_result)
     if not candidate_issues:
+        warnings = collect_test_warnings(test_result)
+        summary = "测试和合规检查未发现需要修复的问题。"
+        if has_static_only_test(test_result):
+            summary = "未执行行为测试，仅完成静态/合规检查，未发现需要修复的问题。"
+            warnings.append("No behavior tests were executed; result is static-only.")
         return ReportAgentResult(
             agent="ReportAgent",
             status=Status.COMPLETED,
-            summary="测试和合规检查未发现需要修复的问题。",
+            summary=summary,
             issues=[],
             risk_level=Severity.INFO,
             should_fix=False,
+            warnings=warnings,
         )
 
     base_report = build_fallback_report(candidate_issues)
@@ -112,21 +119,35 @@ def build_candidate_issues(test_result: dict[str, Any]) -> list[ReportIssue]:
     for item in test_result.get("test_results", []):
         if item.get("status") != Status.FAILED.value:
             continue
+        is_llm_generated = item.get("tool") == "llm_generated_tests" or item.get("test_mode") == "llm_generated_test"
+        confidence = parse_confidence(item.get("confidence"), 0.85) if is_llm_generated else 0.85
+        severity = Severity.HIGH
+        issue_type = "test_failure"
+        root_cause = "测试命令失败，需要结合失败堆栈定位代码逻辑或断言差异。"
+        recommendation = "优先阅读失败用例和相关源码，修复导致测试失败的最小代码路径。"
+        if is_llm_generated:
+            severity = Severity.HIGH if confidence >= 0.8 else Severity.MEDIUM
+            issue_type = "generated_test_failure"
+            root_cause = "LLM 根据代码和可选需求推断出的行为测试未通过；该结论不是用户确认的验收标准。"
+            recommendation = "检查源码是否符合 inferred_behavior；如果 LLM 推断不准确，应补充 requirement 或用户测试。"
         failures = item.get("failures") or [{}]
         for failure in failures:
+            evidence = compact_text(failure.get("message") or failure.get("traceback") or "test failed")
+            if is_llm_generated and item.get("inferred_behavior"):
+                evidence = compact_text(f"{evidence}\nInferred behavior: {item.get('inferred_behavior')}")
             issues.append(
                 ReportIssue(
                     issue_id=f"ISSUE-{counter:03d}",
                     source=str(item.get("tool", "test")),
-                    type="test_failure",
-                    severity=Severity.HIGH,
-                    confidence=0.85,
+                    type=issue_type,
+                    severity=severity,
+                    confidence=confidence,
                     file=str(failure.get("related_file") or failure.get("file") or ""),
                     line_start=failure.get("line"),
                     line_end=failure.get("line"),
-                    evidence=compact_text(failure.get("message") or failure.get("traceback") or "test failed"),
-                    root_cause="测试命令失败，需要结合失败堆栈定位代码逻辑或断言差异。",
-                    recommendation="优先阅读失败用例和相关源码，修复导致测试失败的最小代码路径。",
+                    evidence=evidence,
+                    root_cause=root_cause,
+                    recommendation=recommendation,
                 )
             )
             counter += 1
@@ -284,6 +305,25 @@ def compact_text(value: Any, limit: int = 1200) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n...[truncated {len(text) - limit} chars]"
+
+
+def parse_confidence(raw: Any, default: float) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, value))
+
+
+def collect_test_warnings(test_result: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for item in test_result.get("test_results", []):
+        warnings.extend(str(warning) for warning in item.get("warnings", []) if str(warning).strip())
+    return warnings
+
+
+def has_static_only_test(test_result: dict[str, Any]) -> bool:
+    return any(item.get("test_mode") == "static_only" for item in test_result.get("test_results", []))
 
 
 def highest_severity(severities: list[Severity]) -> Severity:

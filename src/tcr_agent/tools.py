@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from .schemas import (
     CodeFile,
@@ -97,12 +98,33 @@ def truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return text[:limit] + f"\n...[truncated {len(text) - limit} chars]"
 
 
-def run_python_tests(project: ProjectInput, workspace: Path) -> TestSummary:
+def run_python_tests(project: ProjectInput, workspace: Path, gateway: Any = None) -> TestSummary:
+    strategy = resolve_test_strategy(project)
+    if strategy == "static_only":
+        return static_only_summary()
+    if strategy == "llm_generated_test":
+        return run_llm_generated_tests(project, workspace, gateway)
+
     command = resolve_test_command(project)
     result = run_command("run_tests", command, workspace, int(project.config.get("test_timeout_seconds", 30)))
     summary = parse_test_output(result, command)
     summary.command_result = result
+    summary.test_mode = strategy
+    summary.oracle_source = "command" if strategy == "command_test" else "user_provided"
     return summary
+
+
+def resolve_test_strategy(project: ProjectInput) -> str:
+    configured = project.config.get("test_command")
+    if isinstance(configured, str) and configured.strip():
+        return "command_test"
+    if isinstance(configured, list) and configured:
+        return "command_test"
+    if has_test_files(project.files):
+        return "user_test"
+    if project.config.get("llm_generated_tests_enabled", False):
+        return "llm_generated_test"
+    return "static_only"
 
 
 def resolve_test_command(project: ProjectInput) -> list[str]:
@@ -117,8 +139,7 @@ def resolve_test_command(project: ProjectInput) -> list[str]:
             return [sys.executable, "-m", "pytest", "-q"]
         return [sys.executable, "-m", "unittest", "discover", "-v"]
 
-    python_files = [item.path for item in project.files if item.language == "python" or item.path.endswith(".py")]
-    return [sys.executable, "-m", "py_compile", *python_files]
+    return []
 
 
 def has_test_files(files: list[CodeFile]) -> bool:
@@ -129,9 +150,48 @@ def has_test_files(files: list[CodeFile]) -> bool:
     return False
 
 
-def parse_test_output(result: CommandResult, command: list[str]) -> TestSummary:
+def run_llm_generated_tests(project: ProjectInput, workspace: Path, gateway: Any = None) -> TestSummary:
+    try:
+        from .agents.llm_test_generation import GENERATED_TEST_DIR, generate_llm_tests
+
+        generated = generate_llm_tests(project, workspace, gateway)
+    except Exception as exc:
+        return TestSummary(
+            tool="llm_generated_tests",
+            command=[],
+            status=Status.SKIPPED,
+            test_mode="llm_generated_test",
+            oracle_source="llm_inferred",
+            warnings=[f"LLM generated tests skipped: {exc}"],
+        )
+
+    command = [sys.executable, "-m", "pytest", "-q", GENERATED_TEST_DIR]
+    result = run_command("run_llm_generated_tests", command, workspace, int(project.config.get("test_timeout_seconds", 30)))
+    summary = parse_test_output(result, command, tool_override="llm_generated_tests")
+    summary.command_result = result
+    summary.test_mode = "llm_generated_test"
+    summary.oracle_source = "llm_inferred"
+    summary.confidence = generated.confidence
+    summary.generated_test_ref = generated.generated_test_ref
+    summary.warnings = generated.warnings
+    summary.inferred_behavior = generated.inferred_behavior
+    return summary
+
+
+def static_only_summary() -> TestSummary:
+    return TestSummary(
+        tool="static_only",
+        command=[],
+        status=Status.SKIPPED,
+        test_mode="static_only",
+        oracle_source="none",
+        warnings=["No behavior tests were provided or generated; only compliance/static checks will run."],
+    )
+
+
+def parse_test_output(result: CommandResult, command: list[str], tool_override: str = "") -> TestSummary:
     output = "\n".join(part for part in [result.stdout, result.stderr, result.error] if part)
-    tool = "pytest" if "pytest" in command else "unittest" if "unittest" in command else "py_compile"
+    tool = tool_override or ("pytest" if "pytest" in command else "unittest" if "unittest" in command else "py_compile")
     status = Status.PASSED if result.status == Status.PASSED else Status.FAILED
     passed, failed = parse_counts(output)
     total = passed + failed

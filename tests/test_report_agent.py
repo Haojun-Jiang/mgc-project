@@ -58,6 +58,38 @@ class TestReportAgent(unittest.TestCase):
         parsed = extract_json_object('```json\n{"summary":"ok","issues":[]}\n```')
         self.assertEqual(parsed["summary"], "ok")
 
+    def test_llm_generated_test_failure_enters_report(self):
+        project = ProjectInput.from_dict(
+            {
+                "run_id": "report_generated_tests",
+                "language": "python",
+                "files": [{"path": "main.py", "content": "def add(a, b): return a - b\n"}],
+                "config": {"report_use_llm": False},
+            }
+        )
+        report = generate_report(project, sample_llm_generated_test_result())
+
+        self.assertEqual(report.issues[0].source, "llm_generated_tests")
+        self.assertEqual(report.issues[0].type, "generated_test_failure")
+        self.assertEqual(report.issues[0].severity.value, "high")
+        self.assertEqual(report.issues[0].confidence, 0.86)
+        self.assertIn("LLM", report.issues[0].root_cause)
+
+    def test_static_only_report_is_not_presented_as_behavior_tested(self):
+        project = ProjectInput.from_dict(
+            {
+                "run_id": "report_static_only",
+                "language": "python",
+                "files": [{"path": "main.py", "content": "x = 1\n"}],
+                "config": {"report_use_llm": False},
+            }
+        )
+        report = generate_report(project, sample_static_only_result())
+
+        self.assertFalse(report.should_fix)
+        self.assertIn("未执行行为测试", report.summary)
+        self.assertTrue(report.warnings)
+
 
 def sample_test_result():
     return {
@@ -76,6 +108,52 @@ def sample_test_result():
                         "traceback": "Traceback ... AssertionError: -1 != 3",
                     }
                 ],
+            }
+        ],
+        "compliance_results": [{"tool": "py_compile", "status": "passed", "issues": []}],
+    }
+
+
+def sample_llm_generated_test_result():
+    return {
+        "agent": "TestAgent",
+        "status": "failed",
+        "test_results": [
+            {
+                "tool": "llm_generated_tests",
+                "status": "failed",
+                "test_mode": "llm_generated_test",
+                "oracle_source": "llm_inferred",
+                "confidence": 0.86,
+                "generated_test_ref": "/tmp/test_generated_llm.py",
+                "inferred_behavior": "add(a, b) 应返回两个数之和",
+                "failures": [
+                    {
+                        "test_id": "test_generated_llm.test_add",
+                        "file": "test_generated_llm.py",
+                        "line": 5,
+                        "message": "AssertionError: -1 != 3",
+                        "traceback": "Traceback ... AssertionError: -1 != 3",
+                    }
+                ],
+            }
+        ],
+        "compliance_results": [{"tool": "py_compile", "status": "passed", "issues": []}],
+    }
+
+
+def sample_static_only_result():
+    return {
+        "agent": "TestAgent",
+        "status": "passed",
+        "test_results": [
+            {
+                "tool": "static_only",
+                "status": "skipped",
+                "test_mode": "static_only",
+                "oracle_source": "none",
+                "warnings": ["No behavior tests were provided or generated; only compliance/static checks will run."],
+                "failures": [],
             }
         ],
         "compliance_results": [{"tool": "py_compile", "status": "passed", "issues": []}],

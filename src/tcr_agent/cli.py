@@ -16,6 +16,9 @@ def main() -> int:
     parser.add_argument("--test", nargs="*", default=[], help="Optional Python test files to include.")
     parser.add_argument("--run-id", help="Run id. Defaults to a timestamped id.")
     parser.add_argument("--ai-review", action="store_true", help="Enable LLM code review.")
+    parser.add_argument("--llm-generate-tests", action="store_true", help="Generate pytest tests with LLM when no tests are provided.")
+    parser.add_argument("--requirement", help="Optional natural language requirement used by LLM generated tests.")
+    parser.add_argument("--fix", action="store_true", help="Enable FixAgent auto-fix in the sandbox workspace.")
     parser.add_argument("--no-report-llm", action="store_true", help="Disable LLM report enhancement.")
     parser.add_argument("--test-command", help="Override test command, for example: 'python -m unittest discover -v'.")
     parser.add_argument("--direct", action="store_true", help="Run TestAgent directly without LangGraph.")
@@ -67,8 +70,19 @@ def build_project_from_paths(args: argparse.Namespace) -> dict:
         "lint_tools": ["py_compile"],
         "test_timeout_seconds": 30,
         "ai_code_review_enabled": bool(args.ai_review),
+        "llm_generated_tests_enabled": bool(args.llm_generate_tests),
+        "llm_generated_tests_max_cases": 5,
+        "llm_generated_tests_max_chars": 12000,
+        "llm_generated_tests_max_tokens": 2048,
+        "llm_generated_tests_temperature": 0,
+        "requirement": args.requirement or "",
         "report_use_llm": not args.no_report_llm,
-        "auto_fix": False,
+        "auto_fix": bool(args.fix),
+        "fix_target_severities": ["critical", "high"],
+        "fix_max_issues": 3,
+        "fix_max_chars": 12000,
+        "fix_max_tokens": 2048,
+        "fix_temperature": 0,
         "max_fix_rounds": 2,
     }
     if args.test_command:

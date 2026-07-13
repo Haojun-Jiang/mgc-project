@@ -12,7 +12,7 @@ def run_test_agent(state: GraphState, gateway: LLMGateway | None = None) -> Grap
     try:
         project = ProjectInput.from_dict(state["project"])
         workspace = write_project_to_workspace(project)
-        test_result = run_python_tests(project, workspace)
+        test_result = run_python_tests(project, workspace, gateway=gateway)
         compliance_results = run_python_compliance(project, workspace)
         compliance_results.append(run_ai_code_review(project, gateway=gateway))
 
@@ -66,6 +66,17 @@ def write_raw_logs(workspace: Path, test_result, compliance_results) -> str:
         chunks.append(test_result.command_result.stdout)
         chunks.append("\n\n## stderr\n")
         chunks.append(test_result.command_result.stderr)
+    if getattr(test_result, "test_mode", ""):
+        chunks.append("\n\n## test metadata\n")
+        chunks.append(f"test_mode: {test_result.test_mode}\n")
+        chunks.append(f"oracle_source: {test_result.oracle_source}\n")
+        if test_result.generated_test_ref:
+            chunks.append(f"generated_test_ref: {test_result.generated_test_ref}\n")
+        if test_result.inferred_behavior:
+            chunks.append(f"inferred_behavior: {test_result.inferred_behavior}\n")
+    if getattr(test_result, "warnings", []):
+        chunks.append("\n\n## test warnings\n")
+        chunks.append("\n".join(f"WARNING: {warning}" for warning in test_result.warnings))
     for item in compliance_results:
         chunks.append(f"\n\n## compliance: {item.tool}\n")
         if item.warnings:

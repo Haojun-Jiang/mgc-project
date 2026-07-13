@@ -103,6 +103,12 @@ class TestSummary:
     failed: int = 0
     failures: list[TestFailure] = field(default_factory=list)
     command_result: CommandResult | None = None
+    test_mode: str = ""
+    oracle_source: str = ""
+    confidence: float = 0.0
+    generated_test_ref: str = ""
+    warnings: list[str] = field(default_factory=list)
+    inferred_behavior: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -224,6 +230,45 @@ class ReportAgentResult:
             "risk_level": self.risk_level.value,
             "should_fix": self.should_fix,
             "llm_used": self.llm_used,
+            "warnings": self.warnings,
+        }
+
+
+@dataclass(slots=True)
+class FixPatch:
+    file: str
+    issue_ids: list[str]
+    change_type: str
+    diff: str = ""
+    applied: bool = False
+    error: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class FixAgentResult:
+    agent: Literal["FixAgent"]
+    status: Status
+    llm_used: bool
+    applied: bool
+    workspace_dir: str
+    target_issue_ids: list[str]
+    fix_plan: str = ""
+    patches: list[FixPatch] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "status": self.status.value,
+            "llm_used": self.llm_used,
+            "applied": self.applied,
+            "workspace_dir": self.workspace_dir,
+            "target_issue_ids": self.target_issue_ids,
+            "fix_plan": self.fix_plan,
+            "patches": [item.to_dict() for item in self.patches],
             "warnings": self.warnings,
         }
 

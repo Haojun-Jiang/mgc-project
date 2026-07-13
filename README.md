@@ -1,17 +1,18 @@
 # TCR Agent Prototype
 
-TCR Agent 是一个“测试-合规-纠正”智能体原型。目前已完成第一阶段闭环前半段：
+TCR Agent 是一个“测试-合规-纠正”智能体原型。目前已完成第一版测试、报告和沙箱修复链路：
 
 ```text
 代码输入
   -> TestAgent: 运行测试、语法/合规检查、可选 AI 代码审查
   -> ReportAgent: 汇总测试/合规/AI 审查结果并生成结构化报告
+  -> FixAgent: 根据报告生成修复并应用到临时沙箱
 ```
 
 当前 LangGraph 流程：
 
 ```text
-START -> TestAgent -> ReportAgent -> END
+START -> TestAgent -> ReportAgent -> FixAgent -> END
 ```
 
 ## 已实现功能
@@ -19,6 +20,7 @@ START -> TestAgent -> ReportAgent -> END
 - `TestAgent`
   - 将输入代码写入临时沙箱目录。
   - 自动运行 Python 测试，优先使用 `pytest`，否则回退到 `unittest`。
+  - 没有用户测试时，可选让 LLM 生成 pytest 测试并在沙箱中真实执行。
   - 执行 `py_compile` 语法/合规检查。
   - 可选调用大模型做 AI 代码审查，结果作为 `llm_review` 合规检查输出。
 
@@ -26,6 +28,12 @@ START -> TestAgent -> ReportAgent -> END
   - 读取 `TestAgent` 的测试失败、合规问题、AI 审查问题。
   - 生成统一的 `issues` 报告。
   - 可选再次调用大模型，对报告进行摘要、归因和修复建议增强。
+
+- `FixAgent`
+  - 根据 `ReportAgent` 的 `issues` 筛选需要修复的问题。
+  - 可选调用大模型生成修复后的完整文件内容。
+  - 只在 `TestAgent` 创建的临时 `workspace_dir` 中应用修改，不覆盖用户原始文件。
+  - 本地生成 unified diff，写入 `fix_result.patches`。
 
 - `LLMGateway`
   - 支持 OpenAI-compatible `/chat/completions` 接口。
@@ -49,6 +57,7 @@ START -> TestAgent -> ReportAgent -> END
     test_main.py                      示例测试
     project.json                      JSON 输入示例
     project_ai_review.json            开启 AI 审查的 JSON 输入示例
+    project_llm_generated_tests.json  开启 LLM 自测的 JSON 输入示例
   src/tcr_agent/
     cli.py                            CLI 参数解析
     graph.py                          LangGraph 编排
@@ -58,7 +67,11 @@ START -> TestAgent -> ReportAgent -> END
     agents/test_agent.py              TestAgent
     agents/report_agent.py            ReportAgent
     agents/ai_code_review.py          AI 代码审查检查项
+    agents/llm_test_generation.py     LLM 测试生成
+    agents/fix_agent.py               FixAgent
     templates/ai_code_review_system.md AI 审查 prompt 模板
+    templates/llm_test_generation_system.md LLM 自测 prompt 模板
+    templates/fix_agent_system.md      修复 prompt 模板
 ```
 
 ## 环境安装
@@ -84,7 +97,7 @@ source .venv/bin/activate
 运行单元测试：
 
 ```bash
-python -m unittest tests/test_test_agent.py tests/test_llm_gateway.py tests/test_report_agent.py
+python -m unittest tests/test_test_agent.py tests/test_llm_gateway.py tests/test_report_agent.py tests/test_fix_agent.py
 ```
 
 ## LLM 网关配置
@@ -147,6 +160,12 @@ python run.py --input examples/python_bug/project.json
 python run.py --input examples/python_bug/project_ai_review.json
 ```
 
+启用 LLM 自测：
+
+```bash
+python run.py --input examples/python_bug/project_llm_generated_tests.json
+```
+
 ### 2. 直接传入 Python 源码和测试文件
 
 只运行测试、合规检查和本地报告：
@@ -176,7 +195,41 @@ llm_review AI 代码审查
 ReportAgent LLM 报告增强
 ```
 
-### 3. 只调用一次大模型
+### 3. 启用 FixAgent 沙箱修复
+
+```bash
+python run.py \
+  --code examples/python_bug/main.py \
+  --test examples/python_bug/test_main.py \
+  --ai-review \
+  --fix \
+  --no-report-llm
+```
+
+`--fix` 会设置 `auto_fix=true`。FixAgent 会调用大模型生成修复，并只修改输出中的临时 `workspace_dir` 文件。
+
+### 4. 没有测试文件时启用 LLM 自测
+
+```bash
+python run.py \
+  --code examples/python_bug/main.py \
+  --llm-generate-tests \
+  --requirement "add(a, b) 应返回 a 与 b 的和" \
+  --no-report-llm
+```
+
+LLM 自测会执行：
+
+```text
+LLM 推断行为并生成 pytest 测试
+写入 workspace/.tcr_generated_tests/test_generated_llm.py
+运行 python -m pytest -q .tcr_generated_tests
+将失败结果标记为 llm_generated_tests
+```
+
+这类测试的 `oracle_source` 是 `llm_inferred`，表示它来自 LLM 根据代码和需求推断出的测试假设，不等价于用户确认的验收标准。
+
+### 5. 只调用一次大模型
 
 如果你只想让 `TestAgent` 做 AI 代码审查，不想让 `ReportAgent` 再调用一次大模型：
 
@@ -188,7 +241,7 @@ python run.py \
   --no-report-llm
 ```
 
-### 4. 保存结果
+### 6. 保存结果
 
 ```bash
 python run.py \
@@ -230,6 +283,15 @@ test_result
 test_result.test_results
   测试执行结果，例如 pytest/unittest
 
+test_result.test_results[].test_mode
+  测试策略，例如 command_test、user_test、llm_generated_test、static_only
+
+test_result.test_results[].oracle_source
+  测试 oracle 来源，例如 command、user_provided、llm_inferred、none
+
+test_result.test_results[].generated_test_ref
+  LLM 自测生成的测试文件路径
+
 test_result.compliance_results
   合规检查结果，例如 py_compile、llm_review
 
@@ -238,6 +300,12 @@ report_result
 
 report_result.issues
   统一问题列表，包含 issue_id、source、severity、evidence、root_cause、recommendation
+
+fix_result
+  FixAgent 输出
+
+fix_result.patches
+  沙箱修复补丁，包含 file、issue_ids、diff、applied、error
 
 report_result.warnings
   非致命告警，例如 LLM 调用失败后回退到本地报告
@@ -256,6 +324,9 @@ test_result.compliance_results 中 tool = "llm_review" 的对象
 ## 当前限制
 
 - 目前主要支持 Python 文件。
-- 当前只完成 `TestAgent -> ReportAgent`，还未实现 `FixAgent` 和 `VerifyAgent`。
+- 当前只完成 `TestAgent -> ReportAgent -> FixAgent`，还未实现 `VerifyAgent` 复测闭环。
+- FixAgent 第一版只修改临时沙箱文件，不会自动覆盖用户原始文件。
 - AI 审查默认关闭，必须通过 `--ai-review` 或 JSON 配置显式开启。
+- LLM 自测默认关闭，必须通过 `--llm-generate-tests` 或 JSON 配置显式开启。
+- LLM 自测来自模型推断，报告会标记 `oracle_source=llm_inferred`，不能等同于用户提供的确定性验收测试。
 - `ruff`、`semgrep` 目前仅预留为合规工具扩展点，MVP 中未完整实现。

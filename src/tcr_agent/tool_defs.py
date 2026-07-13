@@ -44,6 +44,24 @@ RUN_COMPLIANCE_TOOL = function_tool(
     },
 )
 
+GENERATE_TESTS_TOOL = function_tool(
+    "generate_tests",
+    "Generate pytest tests from source code and an optional natural language requirement.",
+    {
+        "type": "object",
+        "properties": {
+            "requirement": {
+                "type": "string",
+                "description": "Optional natural language behavior requirement used as the test oracle hint.",
+            },
+            "max_cases": {
+                "type": "integer",
+                "description": "Maximum number of generated test cases.",
+            },
+        },
+    },
+)
+
 APPLY_PATCH_TOOL = function_tool(
     "apply_patch",
     "Apply a unified diff patch to the sandbox workspace after validation.",
@@ -86,6 +104,7 @@ TASK_DONE_TOOL = function_tool(
 BASE_TOOL_DEFS = [
     RUN_TESTS_TOOL,
     RUN_COMPLIANCE_TOOL,
+    GENERATE_TESTS_TOOL,
     APPLY_PATCH_TOOL,
     TASK_DONE_TOOL,
 ]

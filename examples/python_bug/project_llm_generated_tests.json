@@ -1,0 +1,24 @@
+{
+  "run_id": "demo_python_bug_llm_tests_001",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "language": "python",
+      "content": "def add(a, b):\n    return a - b\n"
+    }
+  ],
+  "config": {
+    "lint_tools": ["py_compile"],
+    "test_timeout_seconds": 30,
+    "llm_generated_tests_enabled": true,
+    "llm_generated_tests_max_cases": 5,
+    "llm_generated_tests_max_chars": 12000,
+    "llm_generated_tests_max_tokens": 2048,
+    "llm_generated_tests_temperature": 0,
+    "requirement": "add(a, b) 应返回 a 与 b 的和",
+    "report_use_llm": false,
+    "auto_fix": false,
+    "max_fix_rounds": 2
+  }
+}

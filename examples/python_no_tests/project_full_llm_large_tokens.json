@@ -1,0 +1,32 @@
+{
+  "run_id": "full_llm_no_tests_order_pricing_large_tokens",
+  "language": "python",
+  "files": [
+    {
+      "path": "order_pricing.py",
+      "language": "python",
+      "content": "from __future__ import annotations\n\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass OrderItem:\n    sku: str\n    unit_price: float\n    quantity: int\n    active: bool = True\n\n\ndef parse_coupon(coupon: str | None) -> tuple[str, float]:\n    if not coupon:\n        return \"\", 0.0\n    kind, raw_value = coupon.split(\":\", 1)\n    return kind.upper(), float(raw_value)\n\n\ndef calculate_invoice(items: list[OrderItem], coupon: str | None = None, tax_rate: float = 0.13) -> dict[str, float]:\n    \"\"\"Calculate an invoice summary for active order items.\"\"\"\n    subtotal = 0.0\n    item_count = 0\n\n    for item in items:\n        if item.unit_price < 0:\n            raise ValueError(\"unit_price must be non-negative\")\n        subtotal += item.unit_price * item.quantity\n        item_count += 1\n\n    coupon_kind, coupon_value = parse_coupon(coupon)\n    discount = 0.0\n    if coupon_kind == \"FIXED\":\n        discount = coupon_value\n    elif coupon_kind == \"PERCENT\":\n        discount = subtotal * coupon_value\n\n    taxable_amount = subtotal\n    tax = round(taxable_amount * tax_rate, 2)\n    total = round(subtotal - discount + tax, 2)\n\n    return {\n        \"subtotal\": round(subtotal, 2),\n        \"discount\": round(discount, 2),\n        \"tax\": tax,\n        \"total\": total,\n        \"item_count\": item_count,\n    }\n"
+    }
+  ],
+  "config": {
+    "lint_tools": ["py_compile"],
+    "test_timeout_seconds": 30,
+    "ai_code_review_enabled": true,
+    "ai_code_review_max_tokens": 8192,
+    "llm_generated_tests_enabled": true,
+    "llm_generated_tests_max_cases": 5,
+    "llm_generated_tests_max_chars": 12000,
+    "llm_generated_tests_max_tokens": 8192,
+    "llm_generated_tests_temperature": 0,
+    "requirement": "该模块实现电商订单金额计算。calculate_invoice(items, coupon=None, tax_rate=0.13) 应忽略 inactive 商品，拒绝负数价格或非正数量，支持 FIXED:10 固定金额优惠和 PERCENT:10 百分比优惠，折扣不能超过小计，tax = round((subtotal - discount) * tax_rate, 2)，total = round(subtotal - discount + tax, 2)，item_count 为 active 商品数量总和。",
+    "report_use_llm": true,
+    "report_max_tokens": 8192,
+    "auto_fix": true,
+    "fix_target_severities": ["critical", "high", "medium"],
+    "fix_max_issues": 3,
+    "fix_max_chars": 12000,
+    "fix_max_tokens": 8192,
+    "fix_temperature": 0,
+    "max_fix_rounds": 2
+  }
+}
