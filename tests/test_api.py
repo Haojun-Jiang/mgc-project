@@ -125,8 +125,36 @@ class TestAgentApi(unittest.TestCase):
         self.assertEqual(fixed_response.json()["files"][0]["path"], "order_pricing.py")
         self.assertIn("return True", fixed_response.json()["files"][0]["content"])
 
+    def test_status_steps_include_verify_agent(self):
+        result = fake_result(
+            "verified",
+            verify_result={
+                "agent": "VerifyAgent",
+                "status": "passed",
+                "passed": True,
+                "round": 1,
+                "max_rounds": 2,
+                "workspace_dir": "",
+                "test_result": {},
+                "warnings": [],
+            },
+        )
 
-def fake_result(summary, fix_result=None):
+        with patch("tcr_agent.api.run_graph", return_value=result):
+            response = self.client.post(
+                "/runs",
+                files=[("files", ("order_pricing.py", "def fixed():\n    return True\n", "text/x-python"))],
+            )
+
+        run_id = response.json()["run_id"]
+        status_response = self.client.get(f"/runs/{run_id}")
+        self.assertEqual(status_response.status_code, 200)
+        status = status_response.json()
+        self.assertEqual(status["steps"][-1], {"agent": "VerifyAgent", "status": "passed"})
+        self.assertEqual(status["result"]["verify_result"]["status"], "passed")
+
+
+def fake_result(summary, fix_result=None, verify_result=None):
     return {
         "run_id": "placeholder",
         "project": {},
@@ -154,6 +182,7 @@ def fake_result(summary, fix_result=None):
             "patches": [],
             "warnings": [],
         },
+        "verify_result": verify_result or {},
         "errors": [],
     }
 
