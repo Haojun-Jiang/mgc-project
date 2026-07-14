@@ -1,0 +1,25 @@
+{
+  "run_id": "demo_python_passing_001",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "language": "python",
+      "content": "def add(a, b):\n    return a + b\n\n\ndef divide(a, b):\n    if b == 0:\n        raise ValueError(\"b must not be zero\")\n    return a / b\n"
+    },
+    {
+      "path": "test_main.py",
+      "language": "python",
+      "content": "import unittest\n\nfrom main import add, divide\n\n\nclass TestMathHelpers(unittest.TestCase):\n    def test_adds_two_numbers(self):\n        self.assertEqual(add(2, 3), 5)\n\n    def test_divides_two_numbers(self):\n        self.assertEqual(divide(8, 2), 4)\n\n    def test_rejects_division_by_zero(self):\n        with self.assertRaises(ValueError):\n            divide(1, 0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  ],
+  "config": {
+    "lint_tools": ["py_compile"],
+    "test_timeout_seconds": 30,
+    "ai_code_review_enabled": false,
+    "llm_generated_tests_enabled": false,
+    "report_use_llm": false,
+    "auto_fix": false,
+    "max_fix_rounds": 2
+  }
+}

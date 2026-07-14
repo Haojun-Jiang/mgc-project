@@ -1,0 +1,26 @@
+{
+  "run_id": "demo_python_custom_command_001",
+  "language": "python",
+  "files": [
+    {
+      "path": "palindrome.py",
+      "language": "python",
+      "content": "def is_palindrome(text):\n    normalized = \"\".join(char.lower() for char in text if char.isalnum())\n    return normalized == normalized[::-1]\n"
+    },
+    {
+      "path": "check_palindrome.py",
+      "language": "python",
+      "content": "import unittest\n\nfrom palindrome import is_palindrome\n\n\nclass PalindromeChecks(unittest.TestCase):\n    def test_sentence_palindrome(self):\n        self.assertTrue(is_palindrome(\"Never odd or even\"))\n\n    def test_regular_word(self):\n        self.assertFalse(is_palindrome(\"agent\"))\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    }
+  ],
+  "config": {
+    "lint_tools": ["py_compile"],
+    "test_timeout_seconds": 30,
+    "test_command": ["python3", "-m", "unittest", "discover", "-p", "check_*.py", "-v"],
+    "ai_code_review_enabled": false,
+    "llm_generated_tests_enabled": false,
+    "report_use_llm": false,
+    "auto_fix": false,
+    "max_fix_rounds": 2
+  }
+}

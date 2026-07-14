@@ -64,6 +64,10 @@ START -> LLMTestGenerationAgent -> TestAgent -> ReportAgent -> FixAgent -> END
     project.json                      JSON 输入示例
     project_ai_review.json            开启 AI 审查的 JSON 输入示例
     project_llm_generated_tests.json  开启 LLM 自测的 JSON 输入示例
+  examples/python_passing/            全部测试通过的绿色路径示例
+  examples/python_syntax_error/       无测试文件但语法检查失败的示例
+  examples/python_multi_file/         多文件业务逻辑错误示例
+  examples/python_custom_command/     自定义测试命令示例
   src/tcr_agent/
     cli.py                            CLI 参数解析
     graph.py                          LangGraph 编排
@@ -171,6 +175,15 @@ python run.py --input examples/python_bug/project_ai_review.json
 
 ```bash
 python run.py --input examples/python_bug/project_llm_generated_tests.json
+```
+
+更多不依赖 LLM 的演示样例：
+
+```bash
+python run.py --input examples/python_passing/project.json
+python run.py --input examples/python_syntax_error/project.json
+python run.py --input examples/python_multi_file/project.json
+python run.py --input examples/python_custom_command/project.json
 ```
 
 ### 2. 直接传入 Python 源码和测试文件

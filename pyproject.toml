@@ -28,3 +28,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 tcr_agent = ["templates/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

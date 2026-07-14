@@ -1,0 +1,20 @@
+{
+  "run_id": "demo_python_syntax_error_001",
+  "language": "python",
+  "files": [
+    {
+      "path": "broken_rules.py",
+      "language": "python",
+      "content": "def normalize_score(score):\n    if score < 0:\n        return 0\n    if score > 100\n        return 100\n    return score\n"
+    }
+  ],
+  "config": {
+    "lint_tools": ["py_compile"],
+    "test_timeout_seconds": 30,
+    "ai_code_review_enabled": false,
+    "llm_generated_tests_enabled": false,
+    "report_use_llm": false,
+    "auto_fix": false,
+    "max_fix_rounds": 2
+  }
+}
