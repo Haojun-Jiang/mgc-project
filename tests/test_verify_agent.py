@@ -55,6 +55,20 @@ class TestVerifyAgent(unittest.TestCase):
         self.assertEqual(state["test_history"][0]["status"], "failed")
         self.assertEqual(len(state["fix_history"]), 1)
 
+    def test_run_direct_emits_agent_progress(self):
+        gateway = StaticLLMGateway(LLMResponse(content=fix_response(FIXED_MAIN)))
+        events = []
+
+        run_direct(
+            project(max_fix_rounds=2),
+            gateway=gateway,
+            progress_callback=lambda agent, status, state: events.append((agent, status, int(state.get("fix_round", 0)))),
+        )
+
+        self.assertIn(("FixAgent", "running", 0), events)
+        self.assertIn(("VerifyAgent", "running", 0), events)
+        self.assertIn(("VerifyAgent", "passed", 1), events)
+
     def test_run_direct_loops_until_second_fix_passes(self):
         gateway = SequenceLLMGateway(
             [

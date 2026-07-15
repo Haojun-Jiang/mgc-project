@@ -17,6 +17,7 @@ export default function UploadPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [advanced, setAdvanced] = useState({ aiReview: true, generateTests: true, reportLlm: true, autoFix: true });
+  const [maxFixRounds, setMaxFixRounds] = useState(2);
 
   function addFiles(incoming: File[]) {
     setError("");
@@ -42,6 +43,7 @@ export default function UploadPage() {
     data.append("report_use_llm", String(advanced.reportLlm));
     data.append("auto_fix", String(advanced.autoFix));
     data.append("fix_target_severities", "critical,high,medium");
+    data.append("max_fix_rounds", String(maxFixRounds));
     try {
       const result = await createRun(data);
       router.push(`/processing/${result.run_id}`);
@@ -91,10 +93,18 @@ export default function UploadPage() {
         )}
 
         <div className="step-label step-label--second"><span>02</span> 描述预期行为 <small>可选</small></div>
-        <textarea value={requirement} onChange={(event) => setRequirement(event.target.value)} placeholder="例如：calculate_discount 应根据会员等级返回正确折扣，结果不得小于 0……" />
+        <textarea
+          value={requirement}
+          onChange={(event) => setRequirement(event.target.value)}
+          placeholder="描述你希望代码实现的效果。例如：会员用户结算时享受 8 折，非会员按原价结算；金额小于 0 时应抛出错误，最终结果保留两位小数。"
+        />
 
         <details className="advanced-options">
-          <summary>高级检测配置 <span>默认已开启完整流程</span></summary>
+          <summary>
+            <span className="advanced-options__chevron" aria-hidden="true">▶</span>
+            <strong>高级检测配置</strong>
+            <small>默认已开启完整流程</small>
+          </summary>
           <div className="option-grid">
             {([
               ["aiReview", "AI 代码审查", "识别安全性与可维护性风险"],
@@ -107,6 +117,19 @@ export default function UploadPage() {
                 <input type="checkbox" checked={advanced[key]} onChange={(event) => setAdvanced({ ...advanced, [key]: event.target.checked })} />
               </label>
             ))}
+            <label className={`option option--number ${advanced.autoFix ? "" : "option--disabled"}`}>
+              <span><strong>最大修复轮次</strong><small>验证失败后最多尝试 1–10 轮修复</small></span>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                value={maxFixRounds}
+                disabled={!advanced.autoFix}
+                onChange={(event) => setMaxFixRounds(Math.min(10, Math.max(1, Number(event.target.value) || 1)))}
+                aria-label="最大修复轮次"
+              />
+            </label>
           </div>
         </details>
 

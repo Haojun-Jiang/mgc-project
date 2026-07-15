@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import { DownloadIcon, FileIcon } from "@/components/Icons";
 import { artifactUrl, getFixedFiles, getPatch, getReport, getRun } from "@/lib/task-api";
-import type { CodeFile, ReportIssue, RunDetail, RunReport, Severity } from "@/types/run";
+import type { CodeFile, ReportIssue, RunDetail, RunReport, Severity, VerifyResult } from "@/types/run";
 
 type ViewItem = { id: string; label: string; kind: "source" | "generated" | "repair" | "report" | "patch"; content: string; path?: string };
 const severityOrder: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -42,8 +42,10 @@ export default function ResultPage() {
     return () => { active = false; };
   }, [router, taskId]);
 
-  const sources = run?.result?.project?.files || [];
-  const generated = run?.result?.generated_test_result?.test_files || [];
+  const sources = useMemo(() => run?.result?.project?.files || [], [run]);
+  const generated = useMemo(() => run?.result?.generated_test_result?.test_files || [], [run]);
+  const verify = run?.result?.verify_result;
+  const repairStatus = verify?.status === "passed" ? "已验证" : verify?.status === "failed" ? "验证未通过" : verify?.status === "skipped" ? "验证已跳过" : "未验证";
   const items = useMemo<ViewItem[]>(() => [
     { id: "report", label: "检测报告", kind: "report", content: report ? JSON.stringify(report, null, 2) : "" },
     ...sources.map((file) => ({ id: `source:${file.path}`, label: file.path, path: file.path, kind: "source" as const, content: file.content })),
@@ -70,7 +72,10 @@ export default function ResultPage() {
       <AppHeader compact />
       <div className="workspace-toolbar">
         <div><Link href="/upload">所有任务</Link><span>/</span><strong>{taskId}</strong></div>
-        <div className="workspace-summary"><span className={`risk-pill risk-pill--${report?.risk_level || "info"}`}>{severityLabel[report?.risk_level || "info"]}风险</span><strong>{report?.issues.length || 0}</strong><span>个问题</span></div>
+        <div className="workspace-summary">
+          {verify && <span className={`verification-pill verification-pill--${verify.status}`}>{verify.status === "passed" ? "验证通过" : verify.status === "failed" ? "验证未通过" : "验证已跳过"}</span>}
+          <span className={`risk-pill risk-pill--${report?.risk_level || "info"}`}>{severityLabel[report?.risk_level || "info"]}风险</span><strong>{report?.issues.length || 0}</strong><span>个原始问题</span>
+        </div>
         <div className="workspace-actions"><Link href="/upload" className="secondary-button">新建检测</Link><a className="primary-button primary-button--small" href={artifactUrl(taskId, "fix.patch")}><DownloadIcon /> 下载 Patch</a></div>
       </div>
 
@@ -89,7 +94,7 @@ export default function ResultPage() {
             <div><span className={`file-kind file-kind--${selected?.kind}`}>{selected?.kind === "source" ? "SOURCE" : selected?.kind === "repair" ? "REPAIR" : selected?.kind === "patch" ? "DIFF" : selected?.kind === "report" ? "REPORT" : "TEST"}</span><span>{selected?.content.split("\n").length || 0} 行</span></div>
             {selected?.path && selected.kind !== "source" && selected.kind !== "generated" && <a href={artifactUrl(taskId, selected.path)}><DownloadIcon /> 下载</a>}
           </div>
-          {selected?.kind === "report" ? <ReportOverview report={report!} onIssue={openIssue} /> : <CodeViewer content={selected?.content || ""} highlightLine={lineStart} empty={selected?.kind === "patch" ? "本次检测没有生成 Patch" : "文件内容为空"} />}
+          {selected?.kind === "report" ? <ReportOverview report={report!} verify={verify} hasRepairs={repairs.length > 0} onIssue={openIssue} /> : <CodeViewer content={selected?.content || ""} highlightLine={lineStart} empty={selected?.kind === "patch" ? "本次检测没有生成 Patch" : "文件内容为空"} />}
         </section>
 
         <aside className="inspector-panel">
@@ -112,10 +117,10 @@ export default function ResultPage() {
             <div className="repair-list">
               {repairs.length ? repairs.map((file) => (
                 <button key={file.path} onClick={() => setSelectedId(`repair:${file.path}`)}>
-                  <span className="repair-icon">✓</span><span><strong>{file.path}</strong><small>沙箱修复文件 · {file.content.split("\n").length} 行</small></span><span>→</span>
+                  <span className={`repair-icon ${verify?.status === "passed" ? "" : verify?.status === "failed" ? "repair-icon--failed" : "repair-icon--unverified"}`}>{verify?.status === "passed" ? "✓" : verify?.status === "failed" ? "!" : "?"}</span><span><strong>{file.path}</strong><small>沙箱修复文件 · {repairStatus} · {file.content.split("\n").length} 行</small></span><span>→</span>
                 </button>
               )) : <EmptyPanel title="暂无修复文件" description="本次检测未应用自动修复，原始代码没有被修改。" />}
-              {patch && <button onClick={() => setSelectedId("patch")}><span className="repair-icon repair-icon--patch">±</span><span><strong>fix.patch</strong><small>Unified diff 修复补丁</small></span><span>→</span></button>}
+              {patch && <button onClick={() => setSelectedId("patch")}><span className="repair-icon repair-icon--patch">±</span><span><strong>fix.patch</strong><small>Unified diff 修复补丁 · {repairStatus}</small></span><span>→</span></button>}
             </div>
           )}
         </aside>
@@ -133,9 +138,26 @@ function CodeViewer({ content, highlightLine, empty }: { content: string; highli
   return <div className="code-viewer">{content.split("\n").map((line, index) => <div className={`code-line ${highlightLine === index + 1 ? "code-line--highlight" : ""}`} key={index}><span>{index + 1}</span><code>{line || " "}</code></div>)}</div>;
 }
 
-function ReportOverview({ report, onIssue }: { report: RunReport; onIssue: (issue: ReportIssue) => void }) {
+function ReportOverview({ report, verify, hasRepairs, onIssue }: { report: RunReport; verify?: VerifyResult; hasRepairs: boolean; onIssue: (issue: ReportIssue) => void }) {
   const counts = severityOrder.map((level) => ({ level, count: report.issues.filter((issue) => issue.severity === level).length })).filter((item) => item.count);
-  return <div className="report-overview"><div className="report-heading"><div className={`report-score report-score--${report.risk_level}`}><strong>{report.issues.length}</strong><span>ISSUES</span></div><div><span className="eyebrow"><span /> ANALYSIS COMPLETE</span><h2>代码检测报告</h2><p>{report.summary || "检测已完成，未生成摘要。"}</p></div></div><div className="report-stats">{counts.length ? counts.map(({ level, count }) => <div key={level}><span className={`severity-dot severity-dot--${level}`} /><strong>{count}</strong><small>{severityLabel[level]}问题</small></div>) : <div><span className="severity-dot severity-dot--info" /><strong>0</strong><small>未发现问题</small></div>}</div>{report.warnings.length > 0 && <div className="report-warnings"><strong>运行提示</strong>{report.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>}<h3 className="report-section-title">主要发现</h3><div className="report-issue-grid">{report.issues.slice(0, 6).map((issue) => <button key={issue.issue_id} onClick={() => onIssue(issue)}><span className={`severity-tag severity-tag--${issue.severity}`}>{severityLabel[issue.severity]}</span><strong>{issue.type || issue.issue_id}</strong><small>{issue.file}{issue.line_start ? `:${issue.line_start}` : ""}</small><p>{issue.evidence || issue.root_cause || "查看问题详情"}</p></button>)}{!report.issues.length && <EmptyPanel title="检测通过" description="当前检测范围内没有发现需要关注的问题。" />}</div></div>;
+  return <div className="report-overview"><div className="report-heading"><div className={`report-score report-score--${report.risk_level}`}><strong>{report.issues.length}</strong><span>ISSUES</span></div><div><span className="eyebrow"><span /> ANALYSIS COMPLETE</span><h2>代码检测报告</h2><p>{report.summary || "检测已完成，未生成摘要。"}</p></div></div><VerificationCard verify={verify} hasRepairs={hasRepairs} /><div className="report-stats">{counts.length ? counts.map(({ level, count }) => <div key={level}><span className={`severity-dot severity-dot--${level}`} /><strong>{count}</strong><small>{severityLabel[level]}问题</small></div>) : <div><span className="severity-dot severity-dot--info" /><strong>0</strong><small>未发现问题</small></div>}</div>{report.warnings.length > 0 && <div className="report-warnings"><strong>运行提示</strong>{report.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div>}<h3 className="report-section-title">原始检测发现</h3><div className="report-issue-grid">{report.issues.slice(0, 6).map((issue) => <button key={issue.issue_id} onClick={() => onIssue(issue)}><span className={`severity-tag severity-tag--${issue.severity}`}>{severityLabel[issue.severity]}</span><strong>{issue.type || issue.issue_id}</strong><small>{issue.file}{issue.line_start ? `:${issue.line_start}` : ""}</small><p>{issue.evidence || issue.root_cause || "查看问题详情"}</p></button>)}{!report.issues.length && <EmptyPanel title="检测通过" description="当前检测范围内没有发现需要关注的问题。" />}</div></div>;
+}
+
+function VerificationCard({ verify, hasRepairs }: { verify?: VerifyResult; hasRepairs: boolean }) {
+  if (!verify) {
+    return <div className="verification-card verification-card--neutral"><span>–</span><div><strong>{hasRepairs ? "修复产物尚未验证" : "无需修复验证"}</strong><p>{hasRepairs ? "当前结果中没有 VerifyAgent 数据，请谨慎使用修复产物。" : "本次未应用自动修复，因此没有进入修复后验证阶段。"}</p></div></div>;
+  }
+  const testResults = verify.test_result?.test_results || [];
+  const testTotal = testResults.reduce((sum, item) => sum + (item.total || 0), 0);
+  const testPassed = testResults.reduce((sum, item) => sum + (item.passed || 0), 0);
+  const round = `${verify.round}/${verify.max_rounds}`;
+  if (verify.status === "passed") {
+    return <div className="verification-card verification-card--passed"><span>✓</span><div><strong>修复已通过验证</strong><p>第 {round} 轮验证通过{testTotal > 0 ? `，测试 ${testPassed}/${testTotal} 通过` : ""}，修复产物可供下载。</p></div></div>;
+  }
+  if (verify.status === "failed") {
+    return <div className="verification-card verification-card--failed"><span>!</span><div><strong>修复未通过验证</strong><p>第 {round} 轮验证仍有失败，请勿将当前修复产物视为最终可用版本。{verify.warnings?.[0] ? ` ${verify.warnings[0]}` : ""}</p></div></div>;
+  }
+  return <div className="verification-card verification-card--skipped"><span>–</span><div><strong>修复验证已跳过</strong><p>第 {round} 轮未执行完整验证。{verify.warnings?.[0] || "请检查修复产物后再使用。"}</p></div></div>;
 }
 
 function IssueCard({ issue, selected, onClick }: { issue: ReportIssue; selected: boolean; onClick: () => void }) {
