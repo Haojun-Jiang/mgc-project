@@ -309,6 +309,30 @@ class FixAgentResult:
 
 
 @dataclass(slots=True)
+class VerifyAgentResult:
+    agent: Literal["VerifyAgent"]
+    status: Status
+    passed: bool
+    round: int
+    max_rounds: int
+    workspace_dir: str
+    test_result: dict[str, Any]
+    warnings: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent": self.agent,
+            "status": self.status.value,
+            "passed": self.passed,
+            "round": self.round,
+            "max_rounds": self.max_rounds,
+            "workspace_dir": self.workspace_dir,
+            "test_result": self.test_result,
+            "warnings": self.warnings,
+        }
+
+
+@dataclass(slots=True)
 class LLMMessage:
     role: Literal["system", "user", "assistant", "tool"]
     content: str
@@ -378,6 +402,12 @@ class GraphState(TypedDict, total=False):
     report_result: dict[str, Any]
     fix_result: dict[str, Any]
     verify_result: dict[str, Any]
+    fix_round: int
+    max_fix_rounds: int
+    test_history: list[dict[str, Any]]
+    report_history: list[dict[str, Any]]
+    fix_history: list[dict[str, Any]]
+    verify_history: list[dict[str, Any]]
     errors: list[str]
 
 

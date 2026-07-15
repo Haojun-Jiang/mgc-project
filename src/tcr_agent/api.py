@@ -231,12 +231,16 @@ def build_steps(result: dict[str, Any] | None) -> list[dict[str, str]]:
             {"agent": "TestAgent", "status": "pending"},
             {"agent": "ReportAgent", "status": "pending"},
             {"agent": "FixAgent", "status": "pending"},
+            {"agent": "VerifyAgent", "status": "pending"},
         ]
+    test_history = result.get("test_history", [])
+    initial_test_result = test_history[0] if test_history else result.get("test_result", {})
     return [
         {"agent": "LLMTestGenerationAgent", "status": str(result.get("generated_test_result", {}).get("status", "unknown"))},
-        {"agent": "TestAgent", "status": str(result.get("test_result", {}).get("status", "unknown"))},
+        {"agent": "TestAgent", "status": str(initial_test_result.get("status", "unknown"))},
         {"agent": "ReportAgent", "status": str(result.get("report_result", {}).get("status", "unknown"))},
         {"agent": "FixAgent", "status": str(result.get("fix_result", {}).get("status", "unknown"))},
+        {"agent": "VerifyAgent", "status": str(result.get("verify_result", {}).get("status", "unknown"))},
     ]
 
 

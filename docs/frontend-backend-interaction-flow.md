@@ -178,7 +178,8 @@ GET /runs/{run_id}
     {"agent": "LLMTestGenerationAgent", "status": "pending"},
     {"agent": "TestAgent", "status": "pending"},
     {"agent": "ReportAgent", "status": "pending"},
-    {"agent": "FixAgent", "status": "pending"}
+    {"agent": "FixAgent", "status": "pending"},
+    {"agent": "VerifyAgent", "status": "pending"}
   ],
   "summary": "",
   "result": null,
@@ -213,6 +214,21 @@ GET /runs/{run_id}
 1. `GET /runs/{run_id}/report`：报告和 Issue。
 2. `GET /runs/{run_id}/fixed-files`：修复后的文件内容。
 3. `GET /runs/{run_id}/diff.patch`：修复 diff。
+
+如果 `GET /runs/{run_id}` 的 `result` 中包含 `verify_result`，结果页建议展示最终验证状态和修复轮次：
+
+```ts
+{
+  verify_result?: {
+    status: "passed" | "failed" | "skipped";
+    passed: boolean;
+    round: number;
+    max_rounds: number;
+  };
+  fix_round?: number;
+  max_fix_rounds?: number;
+}
+```
 
 ### 6.1 获取报告和 Issue
 
@@ -399,4 +415,3 @@ MVP 阶段更建议前端配置 proxy，这样前端代码里可以直接请求 
 3. 再联调结果页：确认报告和 Issue 能展示。
 4. 再联调 `fixed-files`：确认 Repair 文件可以预览。
 5. 最后联调 `diff.patch` 和 `artifacts`：确认 patch 和文件下载可用。
-

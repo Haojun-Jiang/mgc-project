@@ -53,6 +53,7 @@
 - 展示当前处理阶段。
 - 任务成功后跳转结果页。
 - 任务失败时展示错误信息。
+- 展示 VerifyAgent 验证阶段和修复轮次。
 - 支持重新上传入口。
 
 任务状态建议：
@@ -171,6 +172,9 @@ GET /runs/:taskId
   status: "queued" | "running" | "completed" | "failed";
   summary?: string;
   steps?: [];
+  verify_result?: object;
+  fix_round?: number;
+  max_fix_rounds?: number;
   message?: string;
 }
 ```
