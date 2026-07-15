@@ -108,6 +108,7 @@ Content-Type: multipart/form-data
 | `report_use_llm` | boolean | 否 | `true` | 报告阶段是否启用 LLM 增强。 |
 | `auto_fix` | boolean | 否 | `true` | 是否启用自动修复。 |
 | `fix_target_severities` | string | 否 | `critical,high,medium` | 自动修复目标级别，逗号分隔。 |
+| `max_fix_rounds` | integer | 否 | `2` | 最大修复轮次，取值范围 `1-10`。 |
 
 ### 4.2 上传文件限制
 
@@ -130,7 +131,8 @@ curl -X POST "http://127.0.0.1:8010/runs" \
   -F "llm_generate_tests=true" \
   -F "report_use_llm=true" \
   -F "auto_fix=true" \
-  -F "fix_target_severities=critical,high,medium"
+  -F "fix_target_severities=critical,high,medium" \
+  -F "max_fix_rounds=3"
 ```
 
 ### 4.4 成功响应
@@ -178,6 +180,10 @@ curl "http://127.0.0.1:8010/runs/run_1720840000_ab12cd34"
 | `run_id` | string | 任务 ID。 |
 | `status` | string | 任务状态：`queued`、`running`、`completed`、`failed`。 |
 | `steps` | array | 各 Agent 步骤状态。 |
+| `current_agent` | string/null | 当前正在运行的 Agent；节点切换或任务结束时为 `null`。 |
+| `fix_round` | number/null | 当前修复/验证轮次。 |
+| `max_fix_rounds` | number/null | 最大修复轮次。 |
+| `timeline` | array | Agent 执行时间线；循环中的重复节点会分别记录。 |
 | `summary` | string | 报告摘要；失败时可能是错误信息。 |
 | `result` | object/null | 完整执行结果，任务完成前通常为 `null`。 |
 | `links` | object | 相关接口链接。 |
@@ -189,10 +195,17 @@ curl "http://127.0.0.1:8010/runs/run_1720840000_ab12cd34"
   "run_id": "run_1720840000_ab12cd34",
   "status": "running",
   "steps": [
-    {"agent": "LLMTestGenerationAgent", "status": "pending"},
-    {"agent": "TestAgent", "status": "pending"},
-    {"agent": "ReportAgent", "status": "pending"},
-    {"agent": "FixAgent", "status": "pending"}
+    {"agent": "LLMTestGenerationAgent", "status": "skipped"},
+    {"agent": "TestAgent", "status": "failed"},
+    {"agent": "ReportAgent", "status": "completed"},
+    {"agent": "FixAgent", "status": "completed"},
+    {"agent": "VerifyAgent", "status": "running"}
+  ],
+  "current_agent": "VerifyAgent",
+  "fix_round": 1,
+  "max_fix_rounds": 2,
+  "timeline": [
+    {"agent": "VerifyAgent", "status": "running", "round": 1, "started_at": "2026-07-15T02:00:03Z", "updated_at": "2026-07-15T02:00:03Z"}
   ],
   "summary": "",
   "result": null,
@@ -215,8 +228,12 @@ curl "http://127.0.0.1:8010/runs/run_1720840000_ab12cd34"
     {"agent": "LLMTestGenerationAgent", "status": "skipped"},
     {"agent": "TestAgent", "status": "passed"},
     {"agent": "ReportAgent", "status": "completed"},
-    {"agent": "FixAgent", "status": "completed"}
+    {"agent": "FixAgent", "status": "completed"},
+    {"agent": "VerifyAgent", "status": "passed"}
   ],
+  "current_agent": null,
+  "fix_round": 1,
+  "max_fix_rounds": 2,
   "summary": "发现 1 个高风险问题，已生成修复建议。",
   "result": {
     "generated_test_result": {},
@@ -498,6 +515,16 @@ interface RunStatusResponse {
   run_id: string;
   status: "queued" | "running" | "completed" | "failed";
   steps: Array<{ agent: string; status: string }>;
+  current_agent: string | null;
+  fix_round: number | null;
+  max_fix_rounds: number | null;
+  timeline: Array<{
+    agent: string;
+    status: string;
+    round?: number;
+    started_at: string;
+    updated_at: string;
+  }>;
   summary: string;
   result: Record<string, unknown> | null;
   links: {
@@ -575,4 +602,3 @@ GET  /api/tcr/runs/{runId}/download
 - 任务执行依赖 FastAPI 进程内 `BackgroundTasks`，高并发或长任务场景建议改为任务队列。
 - 运行产物保存在本地磁盘，多实例部署时需要共享存储或粘性路由。
 - LLM 自测是模型推断结果，不等价于用户确认的验收测试。
-

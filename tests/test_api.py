@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from tcr_agent.api import app
+from tcr_agent.api import app, read_json
 
 
 class TestAgentApi(unittest.TestCase):
@@ -38,6 +38,7 @@ class TestAgentApi(unittest.TestCase):
         self.assertEqual(project["files"][0]["path"], "order_pricing.py")
         self.assertEqual(project["config"]["requirement"], "price should return 1")
         self.assertTrue(project["config"]["llm_generated_tests_enabled"])
+        self.assertEqual(project["config"]["max_fix_rounds"], 2)
 
         status_response = self.client.get(f"/runs/{run_id}")
         self.assertEqual(status_response.status_code, 200)
@@ -45,6 +46,8 @@ class TestAgentApi(unittest.TestCase):
         self.assertEqual(status["status"], "completed")
         self.assertEqual(status["summary"], "ok")
         self.assertEqual(status["steps"][2]["agent"], "ReportAgent")
+        self.assertEqual(status["steps"][-1], {"agent": "VerifyAgent", "status": "skipped"})
+        self.assertEqual(status["fix_round"], 0)
 
     def test_upload_user_test_disables_llm_test_generation(self):
         with patch("tcr_agent.api.run_graph", return_value=fake_result("ok")) as mock_run:
@@ -59,6 +62,29 @@ class TestAgentApi(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         project = mock_run.call_args.args[0]
         self.assertFalse(project["config"]["llm_generated_tests_enabled"])
+
+    def test_upload_accepts_configurable_max_fix_rounds(self):
+        with patch("tcr_agent.api.run_graph", return_value=fake_result("ok")) as mock_run:
+            response = self.client.post(
+                "/runs",
+                files=[("files", ("main.py", "value = 1\n", "text/x-python"))],
+                data={"max_fix_rounds": "5"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        project = mock_run.call_args.args[0]
+        self.assertEqual(project["config"]["max_fix_rounds"], 5)
+
+    def test_upload_rejects_max_fix_rounds_outside_allowed_range(self):
+        for value in ("0", "11"):
+            with self.subTest(value=value):
+                response = self.client.post(
+                    "/runs",
+                    files=[("files", ("main.py", "value = 1\n", "text/x-python"))],
+                    data={"max_fix_rounds": value},
+                )
+
+                self.assertEqual(response.status_code, 422)
 
     def test_rejects_invalid_upload_names(self):
         text_response = self.client.post(
@@ -152,6 +178,62 @@ class TestAgentApi(unittest.TestCase):
         status = status_response.json()
         self.assertEqual(status["steps"][-1], {"agent": "VerifyAgent", "status": "passed"})
         self.assertEqual(status["result"]["verify_result"]["status"], "passed")
+
+    def test_running_status_exposes_current_agent_round_and_timeline(self):
+        snapshots = []
+        result = fake_result(
+            "verified",
+            fix_result={
+                "agent": "FixAgent",
+                "status": "completed",
+                "applied": False,
+                "workspace_dir": "",
+                "patches": [],
+            },
+            verify_result={
+                "agent": "VerifyAgent",
+                "status": "passed",
+                "passed": True,
+                "round": 1,
+                "max_rounds": 2,
+                "workspace_dir": "",
+                "test_result": {},
+                "warnings": [],
+            },
+        )
+        result["fix_round"] = 1
+        result["max_fix_rounds"] = 2
+
+        def fake_run(project, progress_callback):
+            state = {"run_id": project["run_id"], "project": project, "errors": []}
+            progress_callback("FixAgent", "running", state)
+            snapshots.append(read_json(Path(self.tempdir.name) / project["run_id"] / "status.json"))
+            state["fix_result"] = {"status": "completed"}
+            progress_callback("FixAgent", "completed", state)
+            progress_callback("VerifyAgent", "running", state)
+            snapshots.append(read_json(Path(self.tempdir.name) / project["run_id"] / "status.json"))
+            state.update({"fix_round": 1, "max_fix_rounds": 2, "verify_result": {"status": "passed"}})
+            progress_callback("VerifyAgent", "passed", state)
+            return result
+
+        with patch("tcr_agent.api.run_graph", side_effect=fake_run):
+            response = self.client.post(
+                "/runs",
+                files=[("files", ("order_pricing.py", "def fixed():\n    return True\n", "text/x-python"))],
+            )
+
+        self.assertEqual(snapshots[0]["current_agent"], "FixAgent")
+        self.assertEqual(snapshots[0]["fix_round"], 1)
+        self.assertEqual(snapshots[0]["steps"][3]["status"], "running")
+        self.assertEqual(snapshots[1]["current_agent"], "VerifyAgent")
+        self.assertEqual(snapshots[1]["timeline"][-1]["round"], 1)
+
+        status = self.client.get(f"/runs/{response.json()['run_id']}").json()
+        self.assertEqual(status["status"], "completed")
+        self.assertIsNone(status["current_agent"])
+        self.assertEqual(status["fix_round"], 1)
+        self.assertEqual(status["max_fix_rounds"], 2)
+        self.assertEqual(status["timeline"][-1]["status"], "passed")
 
 
 def fake_result(summary, fix_result=None, verify_result=None):

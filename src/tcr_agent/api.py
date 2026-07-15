@@ -23,6 +23,7 @@ RUN_ID_PATTERN = re.compile(r"^run_[A-Za-z0-9_-]+$")
 STATUS_FILE = "status.json"
 RESULT_FILE = "result.json"
 PATCH_FILE = "fix.patch"
+AGENT_ORDER = ["LLMTestGenerationAgent", "TestAgent", "ReportAgent", "FixAgent", "VerifyAgent"]
 
 
 @app.post("/runs")
@@ -35,6 +36,7 @@ async def create_run(
     report_use_llm: bool = Form(True),
     auto_fix: bool = Form(True),
     fix_target_severities: str = Form("critical,high,medium"),
+    max_fix_rounds: int = Form(2, ge=1, le=10),
 ) -> dict[str, Any]:
     run_id = make_run_id()
     run_dir = run_dir_for(run_id)
@@ -73,6 +75,7 @@ async def create_run(
             report_use_llm=report_use_llm,
             auto_fix=auto_fix,
             fix_target_severities=fix_target_severities,
+            max_fix_rounds=max_fix_rounds,
         ),
     }
     write_json(run_dir / "project.json", project)
@@ -94,7 +97,11 @@ def get_run(run_id: str) -> dict[str, Any]:
     return {
         "run_id": run_id,
         "status": status.get("status", "unknown"),
-        "steps": build_steps(result),
+        "steps": status.get("steps") or build_steps(result),
+        "current_agent": status.get("current_agent"),
+        "fix_round": status.get("fix_round"),
+        "max_fix_rounds": status.get("max_fix_rounds"),
+        "timeline": status.get("timeline", []),
         "summary": build_summary(status, result),
         "result": result,
         "links": run_links(run_id),
@@ -145,14 +152,121 @@ def get_artifact(run_id: str, name: str):
 
 def run_agent_job(run_id: str, project: dict[str, Any]) -> None:
     run_dir = run_dir_for(run_id)
-    write_status(run_dir, run_id, "running")
+    progress_callback = make_progress_callback(run_dir, run_id, project)
+    write_status(run_dir, run_id, "running", progress=initial_progress(project))
     try:
-        result = run_graph(project)
+        result = run_graph(project, progress_callback=progress_callback)
         write_json(run_dir / RESULT_FILE, result)
         write_artifacts(run_dir, result)
-        write_status(run_dir, run_id, "completed", result_ref=RESULT_FILE)
+        write_status(
+            run_dir,
+            run_id,
+            "completed",
+            result_ref=RESULT_FILE,
+            progress={
+                "steps": build_steps(result),
+                "current_agent": None,
+                "fix_round": result.get("fix_round", 0),
+                "max_fix_rounds": result.get("max_fix_rounds", configured_max_rounds(project)),
+            },
+        )
     except Exception as exc:
-        write_status(run_dir, run_id, "failed", error=str(exc))
+        write_status(run_dir, run_id, "failed", error=str(exc), progress=failed_progress(run_dir))
+
+
+def initial_progress(project: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "steps": build_steps(None),
+        "current_agent": None,
+        "fix_round": 0,
+        "max_fix_rounds": configured_max_rounds(project),
+        "timeline": [],
+    }
+
+
+def make_progress_callback(run_dir: Path, run_id: str, project: dict[str, Any]):
+    steps = build_steps(None)
+    timeline: list[dict[str, Any]] = []
+    max_rounds = configured_max_rounds(project)
+
+    def report(agent: str, agent_status: str, state: dict[str, Any]) -> None:
+        for step in steps:
+            if step["agent"] == agent:
+                step["status"] = agent_status
+                break
+
+        round_number = progress_round(agent, agent_status, state)
+        if agent_status == "running":
+            event: dict[str, Any] = {
+                "agent": agent,
+                "status": "running",
+                "started_at": utc_now(),
+                "updated_at": utc_now(),
+            }
+            if round_number is not None:
+                event["round"] = round_number
+            timeline.append(event)
+        else:
+            for event in reversed(timeline):
+                if event["agent"] == agent and event["status"] == "running":
+                    event["status"] = agent_status
+                    event["updated_at"] = utc_now()
+                    if round_number is None:
+                        event.pop("round", None)
+                    break
+
+        current_round = round_number if round_number is not None else int(state.get("fix_round", 0))
+        write_status(
+            run_dir,
+            run_id,
+            "running",
+            progress={
+                "steps": [dict(step) for step in steps],
+                "current_agent": agent if agent_status == "running" else None,
+                "fix_round": current_round,
+                "max_fix_rounds": int(state.get("max_fix_rounds", max_rounds)),
+                "timeline": [dict(event) for event in timeline],
+            },
+        )
+
+    return report
+
+
+def progress_round(agent: str, agent_status: str, state: dict[str, Any]) -> int | None:
+    if agent not in {"FixAgent", "VerifyAgent"}:
+        return None
+    if agent == "FixAgent" and agent_status == "skipped":
+        return None
+    completed_rounds = int(state.get("fix_round", 0))
+    if agent == "VerifyAgent" and agent_status != "running":
+        return completed_rounds
+    return completed_rounds + 1
+
+
+def configured_max_rounds(project: dict[str, Any]) -> int:
+    raw = project.get("config", {}).get("max_fix_rounds", 2)
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        return 2
+
+
+def failed_progress(run_dir: Path) -> dict[str, Any]:
+    status = read_optional_json(run_dir / STATUS_FILE) or {}
+    current_agent = status.get("current_agent")
+    steps = [dict(step) for step in status.get("steps", build_steps(None))]
+    if current_agent:
+        for step in steps:
+            if step["agent"] == current_agent:
+                step["status"] = "failed"
+                break
+    timeline = [dict(event) for event in status.get("timeline", [])]
+    for event in reversed(timeline):
+        if event.get("status") == "running":
+            event["status"] = "failed"
+            event["updated_at"] = utc_now()
+            break
+    return {"steps": steps, "current_agent": None, "timeline": timeline}
 
 
 def build_config(
@@ -162,6 +276,7 @@ def build_config(
     report_use_llm: bool,
     auto_fix: bool,
     fix_target_severities: str,
+    max_fix_rounds: int,
 ) -> dict[str, Any]:
     severities = [item.strip() for item in fix_target_severities.split(",") if item.strip()]
     return {
@@ -181,7 +296,7 @@ def build_config(
         "fix_max_chars": 12000,
         "fix_max_tokens": 2048,
         "fix_temperature": 0,
-        "max_fix_rounds": 2,
+        "max_fix_rounds": int(max_fix_rounds),
     }
 
 
@@ -226,13 +341,7 @@ def copy_fixed_files(run_dir: Path, result: dict[str, Any]) -> None:
 
 def build_steps(result: dict[str, Any] | None) -> list[dict[str, str]]:
     if not result:
-        return [
-            {"agent": "LLMTestGenerationAgent", "status": "pending"},
-            {"agent": "TestAgent", "status": "pending"},
-            {"agent": "ReportAgent", "status": "pending"},
-            {"agent": "FixAgent", "status": "pending"},
-            {"agent": "VerifyAgent", "status": "pending"},
-        ]
+        return [{"agent": agent, "status": "pending"} for agent in AGENT_ORDER]
     test_history = result.get("test_history", [])
     initial_test_result = test_history[0] if test_history else result.get("test_result", {})
     return [
@@ -240,7 +349,7 @@ def build_steps(result: dict[str, Any] | None) -> list[dict[str, str]]:
         {"agent": "TestAgent", "status": str(initial_test_result.get("status", "unknown"))},
         {"agent": "ReportAgent", "status": str(result.get("report_result", {}).get("status", "unknown"))},
         {"agent": "FixAgent", "status": str(result.get("fix_result", {}).get("status", "unknown"))},
-        {"agent": "VerifyAgent", "status": str(result.get("verify_result", {}).get("status", "unknown"))},
+        {"agent": "VerifyAgent", "status": str(result.get("verify_result", {}).get("status", "skipped"))},
     ]
 
 
@@ -332,25 +441,32 @@ def write_status(
     status: str,
     error: str = "",
     result_ref: str = "",
+    progress: dict[str, Any] | None = None,
 ) -> None:
     existing = read_optional_json(run_dir / STATUS_FILE) or {}
     created_at = existing.get("created_at") or utc_now()
+    payload = {
+        **existing,
+        "run_id": run_id,
+        "status": status,
+        "created_at": created_at,
+        "updated_at": utc_now(),
+        "error": error,
+        "result_ref": result_ref,
+    }
+    if progress:
+        payload.update(progress)
     write_json(
         run_dir / STATUS_FILE,
-        {
-            "run_id": run_id,
-            "status": status,
-            "created_at": created_at,
-            "updated_at": utc_now(),
-            "error": error,
-            "result_ref": result_ref,
-        },
+        payload,
     )
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = path.with_suffix(f"{path.suffix}.tmp")
+    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(path)
 
 
 def read_json(path: Path) -> dict[str, Any]:

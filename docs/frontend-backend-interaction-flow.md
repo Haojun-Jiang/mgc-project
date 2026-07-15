@@ -68,6 +68,7 @@ Content-Type: multipart/form-data
 | `report_use_llm` | `boolean` | 否 | `true` | 报告是否使用 LLM 增强 |
 | `auto_fix` | `boolean` | 否 | `true` | 是否自动修复 |
 | `fix_target_severities` | `string` | 否 | `critical,high,medium` | 自动修复的问题级别 |
+| `max_fix_rounds` | `number` | 否 | `2` | 最大修复轮次，取值范围 `1-10` |
 
 文件限制：
 
@@ -91,6 +92,7 @@ formData.append("llm_generate_tests", "true");
 formData.append("report_use_llm", "true");
 formData.append("auto_fix", "true");
 formData.append("fix_target_severities", "critical,high,medium");
+formData.append("max_fix_rounds", "3");
 
 const res = await fetch(`${API_BASE_URL}/runs`, {
   method: "POST",
@@ -157,6 +159,16 @@ GET /runs/{run_id}
     agent: string;
     status: string;
   }>;
+  current_agent: string | null;
+  fix_round: number | null;
+  max_fix_rounds: number | null;
+  timeline: Array<{
+    agent: string;
+    status: string;
+    round?: number;
+    started_at: string;
+    updated_at: string;
+  }>;
   summary: string;
   result: unknown | null;
   links: {
@@ -175,11 +187,18 @@ GET /runs/{run_id}
   "run_id": "run_1720840000_ab12cd34",
   "status": "running",
   "steps": [
-    {"agent": "LLMTestGenerationAgent", "status": "pending"},
-    {"agent": "TestAgent", "status": "pending"},
-    {"agent": "ReportAgent", "status": "pending"},
-    {"agent": "FixAgent", "status": "pending"},
-    {"agent": "VerifyAgent", "status": "pending"}
+    {"agent": "LLMTestGenerationAgent", "status": "skipped"},
+    {"agent": "TestAgent", "status": "failed"},
+    {"agent": "ReportAgent", "status": "completed"},
+    {"agent": "FixAgent", "status": "completed"},
+    {"agent": "VerifyAgent", "status": "running"}
+  ],
+  "current_agent": "VerifyAgent",
+  "fix_round": 1,
+  "max_fix_rounds": 2,
+  "timeline": [
+    {"agent": "FixAgent", "status": "completed", "round": 1, "started_at": "2026-07-15T02:00:00Z", "updated_at": "2026-07-15T02:00:03Z"},
+    {"agent": "VerifyAgent", "status": "running", "round": 1, "started_at": "2026-07-15T02:00:03Z", "updated_at": "2026-07-15T02:00:03Z"}
   ],
   "summary": "",
   "result": null,
@@ -204,6 +223,8 @@ GET /runs/{run_id}
 注意事项：
 
 - 页面刷新后，可以直接从 URL 里读取 `taskId` 继续轮询。
+- 使用 `current_agent` 高亮当前阶段；FixAgent/VerifyAgent 可结合 `fix_round` 展示轮次。
+- `timeline` 会保留循环中的多次 Report/Fix/Verify 执行记录。
 - 组件卸载时要清理定时器，避免重复请求。
 - 建议设置超时时间，例如超过 10 分钟仍未完成时提示用户稍后查看。
 

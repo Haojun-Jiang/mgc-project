@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from .agents.fix_agent import run_fix_agent
 from .agents.llm_test_generation_agent import run_llm_test_generation_agent
@@ -10,19 +10,29 @@ from .agents.verify_agent import configured_max_fix_rounds, run_verify_agent
 from .llm_gateway import LLMGateway
 from .schemas import GraphState, ProjectInput
 
+ProgressCallback = Callable[[str, str, GraphState], None]
 
-def build_graph():
+AGENT_RESULT_KEYS = {
+    "LLMTestGenerationAgent": "generated_test_result",
+    "TestAgent": "test_result",
+    "ReportAgent": "report_result",
+    "FixAgent": "fix_result",
+    "VerifyAgent": "verify_result",
+}
+
+
+def build_graph(progress_callback: ProgressCallback | None = None):
     try:
         from langgraph.graph import END, START, StateGraph
     except ImportError as exc:
         raise RuntimeError("LangGraph is not installed. Run `python3 -m pip install -e .`.") from exc
 
     graph = StateGraph(GraphState)
-    graph.add_node("llm_test_generation_agent", run_llm_test_generation_agent)
-    graph.add_node("test_agent", run_test_agent)
-    graph.add_node("report_agent", run_report_agent)
-    graph.add_node("fix_agent", run_fix_agent)
-    graph.add_node("verify_agent", run_verify_agent)
+    graph.add_node("llm_test_generation_agent", tracked_node("LLMTestGenerationAgent", run_llm_test_generation_agent, progress_callback))
+    graph.add_node("test_agent", tracked_node("TestAgent", run_test_agent, progress_callback))
+    graph.add_node("report_agent", tracked_node("ReportAgent", run_report_agent, progress_callback))
+    graph.add_node("fix_agent", tracked_node("FixAgent", run_fix_agent, progress_callback))
+    graph.add_node("verify_agent", tracked_node("VerifyAgent", run_verify_agent, progress_callback))
     graph.add_edge(START, "llm_test_generation_agent")
     graph.add_edge("llm_test_generation_agent", "test_agent")
     graph.add_edge("test_agent", "report_agent")
@@ -46,9 +56,9 @@ def build_graph():
     return graph.compile()
 
 
-def run_graph(project: ProjectInput | dict[str, Any]) -> GraphState:
+def run_graph(project: ProjectInput | dict[str, Any], progress_callback: ProgressCallback | None = None) -> GraphState:
     project_input = project if isinstance(project, ProjectInput) else ProjectInput.from_dict(project)
-    app = build_graph()
+    app = build_graph(progress_callback=progress_callback)
     initial_state: GraphState = {
         "run_id": project_input.run_id,
         "project": project_input.to_dict(),
@@ -57,23 +67,50 @@ def run_graph(project: ProjectInput | dict[str, Any]) -> GraphState:
     return app.invoke(initial_state)
 
 
-def run_direct(project: ProjectInput | dict[str, Any], gateway: LLMGateway | None = None) -> GraphState:
+def run_direct(
+    project: ProjectInput | dict[str, Any],
+    gateway: LLMGateway | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> GraphState:
     project_input = project if isinstance(project, ProjectInput) else ProjectInput.from_dict(project)
     initial_state: GraphState = {
         "run_id": project_input.run_id,
         "project": project_input.to_dict(),
         "errors": [],
     }
-    state = run_llm_test_generation_agent(initial_state, gateway=gateway)
-    state = run_test_agent(state, gateway=gateway)
+    state = run_tracked("LLMTestGenerationAgent", lambda current: run_llm_test_generation_agent(current, gateway=gateway), initial_state, progress_callback)
+    state = run_tracked("TestAgent", lambda current: run_test_agent(current, gateway=gateway), state, progress_callback)
     while True:
-        state = run_report_agent(state)
-        state = run_fix_agent(state, gateway=gateway)
+        state = run_tracked("ReportAgent", run_report_agent, state, progress_callback)
+        state = run_tracked("FixAgent", lambda current: run_fix_agent(current, gateway=gateway), state, progress_callback)
         if route_after_fix(state) != "verify":
             return state
-        state = run_verify_agent(state)
+        state = run_tracked("VerifyAgent", run_verify_agent, state, progress_callback)
         if route_after_verify(state) != "report":
             return state
+
+
+def tracked_node(agent: str, runner: Callable[[GraphState], GraphState], progress_callback: ProgressCallback | None):
+    def invoke(state: GraphState) -> GraphState:
+        return run_tracked(agent, runner, state, progress_callback)
+
+    return invoke
+
+
+def run_tracked(
+    agent: str,
+    runner: Callable[[GraphState], GraphState],
+    state: GraphState,
+    progress_callback: ProgressCallback | None,
+) -> GraphState:
+    if progress_callback:
+        progress_callback(agent, "running", state)
+    next_state = runner(state)
+    if progress_callback:
+        result_key = AGENT_RESULT_KEYS[agent]
+        final_status = str(next_state.get(result_key, {}).get("status", "unknown"))
+        progress_callback(agent, final_status, next_state)
+    return next_state
 
 
 def route_after_fix(state: GraphState) -> str:
