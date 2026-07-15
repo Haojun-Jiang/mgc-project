@@ -14,10 +14,10 @@ pnpm dev
 默认访问地址：`http://localhost:3000/upload`。
 
 前端通过 `/api/tcr/*` 代理访问 FastAPI，FastAPI 默认地址为
-`http://127.0.0.1:8010`。如果地址不同，可在启动前设置：
+`http://127.0.0.1:8000`。如果地址不同，可在启动前设置：
 
 ```bash
-TCR_API_BASE_URL=http://your-api-host:8010 pnpm dev
+TCR_API_BASE_URL=http://your-api-host:8000 pnpm dev
 ```
 
 ## 页面

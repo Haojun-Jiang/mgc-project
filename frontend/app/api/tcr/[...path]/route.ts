@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-const backend = process.env.TCR_API_BASE_URL || "http://127.0.0.1:8010";
+const backend = process.env.TCR_API_BASE_URL || "http://127.0.0.1:8000";
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
