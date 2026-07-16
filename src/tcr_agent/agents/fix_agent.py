@@ -22,9 +22,9 @@ from ..schemas import (
 from ..tools import safe_relative_path
 
 DEFAULT_TARGET_SEVERITIES = {Severity.CRITICAL, Severity.HIGH}
-DEFAULT_MAX_CHARS = 12000
+DEFAULT_MAX_CHARS = 40000
 DEFAULT_MAX_ISSUES = 3
-DEFAULT_MAX_TOKENS = 2048
+DEFAULT_MAX_TOKENS = 8192
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "templates" / "fix_agent_system.md"
 
 

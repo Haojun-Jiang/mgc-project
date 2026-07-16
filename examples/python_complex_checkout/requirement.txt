@@ -1,0 +1,25 @@
+calculate_checkout 用于计算电商订单的最终结算结果。业务规则如下：
+1. 只有 active=True 的商品参与结算、促销、运费门槛、税费和风控计算。
+2. 商品 unit_price 必须大于等于 0，quantity 必须大于 0，否则抛出 ValueError。
+3. 商品促销先于会员折扣和优惠券执行：
+   - groceries 分类满 200 元，该分类金额打 95 折；
+   - electronics 分类满 1000 元，该分类金额打 92 折；
+   - books 分类购买数量大于等于 3 件，该分类金额打 90 折。
+4. 会员折扣在商品促销之后执行：
+   - regular 无折扣；
+   - silver 打 97 折；
+   - gold 打 92 折；
+   - platinum 打 85 折。
+5. 优惠券在会员折扣之后执行：
+   - fixed 类型优惠券在金额大于等于 minimum_amount 时减免 amount_off；
+   - percent 类型优惠券在金额大于等于 minimum_amount 时按 percent_off 减免，且减免金额不能超过 max_discount；
+   - 优惠券最多只能把商品金额减到 0。
+6. 运费按优惠券后的商品金额计算：
+   - domestic 基础运费 12 元，商品金额大于等于 300 元免运费；
+   - remote 基础运费 35 元，商品金额大于等于 800 元免运费；
+   - international 基础运费 95 元，不免运费。
+7. 税费按“优惠券后的商品金额 + 运费”计算：
+   - domestic 税率 6%；
+   - remote 税率 4%；
+   - international 税率 0%。
+8. 返回结果必须包含 subtotal、promotion_discount、member_discount、coupon_discount、shipping_fee、tax、total、risk_flags、line_count。所有金额保留两位小数。

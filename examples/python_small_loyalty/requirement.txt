@@ -1,0 +1,1 @@
+calculate_loyalty_points 用于计算会员积分。只统计 refunded=False 的订单；订单 amount 必须大于等于 0，days_ago 必须大于等于 0，否则抛出 ValueError。基础积分为 eligible_amount 向下取整后的整数。会员倍率为 basic=1.0、plus=1.25、vip=1.5。channel 为 app 的订单金额额外增加 10% 积分，web 和 store 无渠道加成。若存在任一 eligible 订单 days_ago 小于等于 7，且 eligible_amount 大于等于 200，则额外奖励 100 分。最终积分最高为 5000。返回 eligible_amount、base_points、bonus_points、total_points、order_count。

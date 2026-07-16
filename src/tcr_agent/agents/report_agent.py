@@ -226,7 +226,7 @@ def call_llm_for_report(
                 LLMMessage(role="system", content=REPORT_SYSTEM_PROMPT),
                 LLMMessage(role="user", content=json.dumps(payload, ensure_ascii=False)),
             ],
-            max_tokens=int(project.config.get("report_max_tokens", 2048)),
+            max_tokens=int(project.config.get("report_max_tokens", 8192)),
             temperature=float(project.config.get("report_temperature", 0)),
         )
     )

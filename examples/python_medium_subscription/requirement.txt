@@ -1,0 +1,10 @@
+calculate_subscription_invoice 用于计算 SaaS 订阅账单。业务规则如下：
+1. plan_code 必须是 starter、pro、enterprise 之一；seats 必须大于 0。
+2. 套餐月费分别为 starter=99、pro=299、enterprise=899；包含席位分别为 3、10、30。
+3. 超出包含席位后，额外席位单价分别为 starter=18、pro=25、enterprise=40。
+4. billing_cycle 支持 monthly 和 annual。monthly 按 1 个月计费；annual 应按 10 个月计费，相当于买 10 个月送 2 个月。
+5. 只有 active=True 的 add-ons 参与计费和风控；附加功能单价乘以数量后，再乘以账期月份。
+6. 客户类型折扣在套餐和附加功能小计之后、优惠券之前执行：startup 打 90 折，nonprofit 打 85 折，standard 无折扣。
+7. 优惠券在客户类型折扣之后执行：fixed 类型在金额大于等于 minimum_amount 时减免 amount_off；percent 类型在金额大于等于 minimum_amount 时按 percent_off 减免，且减免金额不能超过 max_discount；优惠券最多只能把金额减到 0。
+8. 税费按优惠券后的金额计算：domestic 税率 6%，overseas 税率 0%。
+9. 返回结果必须包含 plan_subtotal、addon_subtotal、customer_discount、coupon_discount、tax、total、risk_flags、billable_addon_count。所有金额保留两位小数。

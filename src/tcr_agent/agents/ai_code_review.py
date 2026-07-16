@@ -8,8 +8,8 @@ from typing import Any
 from ..llm_gateway import LLMGateway, LLMGatewayConfig, LLMGatewayError, build_llm_gateway
 from ..schemas import ComplianceIssue, ComplianceResult, LLMMessage, LLMRequest, ProjectInput, Severity, Status, parse_optional_int, parse_severity
 
-DEFAULT_MAX_CHARS = 12000
-DEFAULT_MAX_TOKENS = 2048
+DEFAULT_MAX_CHARS = 40000
+DEFAULT_MAX_TOKENS = 8192
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "templates" / "ai_code_review_system.md"
 
 

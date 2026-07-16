@@ -9,9 +9,9 @@ from typing import Any
 from ..llm_gateway import LLMGateway, LLMGatewayConfig, build_llm_gateway
 from ..schemas import GeneratedTestFile, LLMMessage, LLMRequest, ProjectInput
 
-DEFAULT_MAX_CHARS = 12000
+DEFAULT_MAX_CHARS = 40000
 DEFAULT_MAX_CASES = 5
-DEFAULT_MAX_TOKENS = 2048
+DEFAULT_MAX_TOKENS = 8192
 GENERATED_TEST_DIR = ".tcr_generated_tests"
 DEFAULT_TEST_FILE = "test_generated_llm.py"
 PROMPT_PATH = Path(__file__).resolve().parents[1] / "templates" / "llm_test_generation_system.md"
